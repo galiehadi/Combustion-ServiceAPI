@@ -2,7 +2,7 @@
 Setting parameter untuk koneksi ke database.
 '''
 
-_UNIT_CODE_ = "RBG1"
+_UNIT_CODE_ = "RBG2"
 _UNIT_NAME_ = "PLTU Rembang 10"
 _USER_ = 'root'
 _PASS_ = 'P@ssw0rd'
