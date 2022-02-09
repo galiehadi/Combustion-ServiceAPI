@@ -1,0 +1,375 @@
+{
+  "object": {
+    "watchdog": 1,
+    "comb_enable": 0,
+    "parameter": [
+      {
+        "id": 1,
+        "label": "APH O2 COMPENSATION",
+        "value": -2.59473
+      },
+      {
+        "id": 2,
+        "label": "WAITING TIME (MINUTE)",
+        "value": 15
+      }
+    ],
+    "last_recommendation": "02/02/2022 10:25:00",
+    "rules": [
+      {
+        "id": 20,
+        "label": "SAFEGUARD"
+      }
+    ],
+    "comb_tags": {
+      "mill_d_hot_pa_damper": "70.0 %",
+      "o2_reading_b_outlet_aph": "-0.1 %",
+      "mill_a_cold_pa_damper": "55.2 %",
+      "o2_reading_b_inlet_aph": "6.2 %",
+      "o2_reading_a_outlet_aph": "1.0 %",
+      "mill_c_cold_pa_damper": "30.3 %",
+      "total_coal_flow": "212.3 t/h",
+      "pa_fan_b_damper": "62.3 %",
+      "mill_b_hot_pa_damper": "68.0 %",
+      "allwind": "1015.7 T/H",
+      "pa_fan_a_damper": "65.5 %",
+      "mill_d_cold_pa_damper": "18.9 %",
+      "o2_reading_a_inlet_aph": "1.0 %",
+      "mill_c_hot_pa_damper": "61.0 %",
+      "mill_e_hot_pa_damper": "51.0 %",
+      "id_fan_b_damper": "83.2 %",
+      "id_fan_a_damper": "83.9 %",
+      "mill_e_cold_pa_damper": "32.2 %",
+      "mill_f_hot_pa_damper": "57.0 %",
+      "burner_tilt_2": "65.7 °",
+      "burner_tilt_1": "45.1 °",
+      "fd_fan_b_damper": "22.7 %",
+      "burner_tilt_4": "45.0 °",
+      "burner_tilt_3": "45.2 °",
+      "active_power": "325.0 MW",
+      "mill_b_cold_pa_damper": "33.0 %",
+      "fd_fan_a_damper": "13.0 %",
+      "mill_f_cold_pa_damper": "17.7 %",
+      "mill_a_hot_pa_damper": "52.0 %"
+    },
+    "recommendations": [
+      {
+        "setValue": "48.53 t/h",
+        "targetValue": "1168.47 t/h",
+        "currentValue": "1119.94 t/h",
+        "timestamp": "2022-02-02 10:25:00.0",
+        "desc": "All Wind",
+        "status": 0
+      },
+      {
+        "setValue": "2.33 °",
+        "targetValue": "47.43 °",
+        "currentValue": "45.10 °",
+        "timestamp": "2022-02-02 10:25:00.0",
+        "desc": "Burner Tilt Position 0",
+        "status": 0
+      },
+      {
+        "setValue": "1.91 °",
+        "targetValue": "67.59 °",
+        "currentValue": "65.68 °",
+        "timestamp": "2022-02-02 10:25:00.0",
+        "desc": "Burner Tilt Position 1",
+        "status": 0
+      },
+      {
+        "setValue": "2.41 °",
+        "targetValue": "47.54 °",
+        "currentValue": "45.13 °",
+        "timestamp": "2022-02-02 10:25:00.0",
+        "desc": "Burner Tilt Position 2",
+        "status": 0
+      },
+      {
+        "setValue": "0.71 °",
+        "targetValue": "45.66 °",
+        "currentValue": "44.95 °",
+        "timestamp": "2022-02-02 10:25:00.0",
+        "desc": "Burner Tilt Position 3",
+        "status": 0
+      },
+      {
+        "setValue": "0.12 %",
+        "targetValue": "1.37 %",
+        "currentValue": "1.25 %",
+        "timestamp": "2022-02-02 10:25:00.0",
+        "desc": "Excess O2",
+        "status": 0
+      },
+      {
+        "setValue": "-1.24 °C",
+        "targetValue": "63.00 °C",
+        "currentValue": "64.24 °C",
+        "timestamp": "2022-02-02 10:25:00.0",
+        "desc": "Mill A Outlet Temperature",
+        "status": 0
+      },
+      {
+        "setValue": "0.11 °C",
+        "targetValue": "63.00 °C",
+        "currentValue": "62.89 °C",
+        "timestamp": "2022-02-02 10:25:00.0",
+        "desc": "Mill B Outlet Temperature",
+        "status": 0
+      },
+      {
+        "setValue": "1.82 ° C",
+        "targetValue": "63.00 ° C",
+        "currentValue": "61.18 ° C",
+        "timestamp": "2022-02-02 10:25:00.0",
+        "desc": "Mill C Outlet Temperature",
+        "status": 0
+      },
+      {
+        "setValue": "4.04 °C",
+        "targetValue": "63.00 °C",
+        "currentValue": "58.96 °C",
+        "timestamp": "2022-02-02 10:25:00.0",
+        "desc": "Mill D Outlet Temperature",
+        "status": 0
+      },
+      {
+        "setValue": "-0.25 °C",
+        "targetValue": "63.00 °C",
+        "currentValue": "63.25 °C",
+        "timestamp": "2022-02-02 10:25:00.0",
+        "desc": "Mill E Outlet Temperature",
+        "status": 0
+      },
+      {
+        "setValue": "5.83 °C",
+        "targetValue": "63.00 °C",
+        "currentValue": "57.17 °C",
+        "timestamp": "2022-02-02 10:25:00.0",
+        "desc": "Mill F Outlet Temperature",
+        "status": 0
+      },
+      {
+        "setValue": "48.53 t/h",
+        "targetValue": "799.46 t/h",
+        "currentValue": "750.94 t/h",
+        "timestamp": "2022-02-02 10:25:00.0",
+        "desc": "Total Secondary Air Flow",
+        "status": 0
+      },
+      {
+        "setValue": "47.39 t/h",
+        "targetValue": "1202.84 t/h",
+        "currentValue": "1155.44 t/h",
+        "timestamp": "2022-02-02 10:23:00.0",
+        "desc": "All Wind",
+        "status": 0
+      },
+      {
+        "setValue": "2.61 °",
+        "targetValue": "47.71 °",
+        "currentValue": "45.10 °",
+        "timestamp": "2022-02-02 10:23:00.0",
+        "desc": "Burner Tilt Position 0",
+        "status": 0
+      },
+      {
+        "setValue": "1.85 °",
+        "targetValue": "67.53 °",
+        "currentValue": "65.69 °",
+        "timestamp": "2022-02-02 10:23:00.0",
+        "desc": "Burner Tilt Position 1",
+        "status": 0
+      },
+      {
+        "setValue": "2.34 °",
+        "targetValue": "47.48 °",
+        "currentValue": "45.13 °",
+        "timestamp": "2022-02-02 10:23:00.0",
+        "desc": "Burner Tilt Position 2",
+        "status": 0
+      },
+      {
+        "setValue": "0.69 °",
+        "targetValue": "45.64 °",
+        "currentValue": "44.95 °",
+        "timestamp": "2022-02-02 10:23:00.0",
+        "desc": "Burner Tilt Position 3",
+        "status": 0
+      },
+      {
+        "setValue": "0.09 %",
+        "targetValue": "1.48 %",
+        "currentValue": "1.39 %",
+        "timestamp": "2022-02-02 10:23:00.0",
+        "desc": "Excess O2",
+        "status": 0
+      },
+      {
+        "setValue": "-1.28 °C",
+        "targetValue": "63.00 °C",
+        "currentValue": "64.28 °C",
+        "timestamp": "2022-02-02 10:23:00.0",
+        "desc": "Mill A Outlet Temperature",
+        "status": 0
+      },
+      {
+        "setValue": "-0.03 °C",
+        "targetValue": "63.00 °C",
+        "currentValue": "63.03 °C",
+        "timestamp": "2022-02-02 10:23:00.0",
+        "desc": "Mill B Outlet Temperature",
+        "status": 0
+      },
+      {
+        "setValue": "1.80 ° C",
+        "targetValue": "63.00 ° C",
+        "currentValue": "61.20 ° C",
+        "timestamp": "2022-02-02 10:23:00.0",
+        "desc": "Mill C Outlet Temperature",
+        "status": 0
+      },
+      {
+        "setValue": "4.02 °C",
+        "targetValue": "63.00 °C",
+        "currentValue": "58.98 °C",
+        "timestamp": "2022-02-02 10:23:00.0",
+        "desc": "Mill D Outlet Temperature",
+        "status": 0
+      },
+      {
+        "setValue": "-0.24 °C",
+        "targetValue": "63.00 °C",
+        "currentValue": "63.24 °C",
+        "timestamp": "2022-02-02 10:23:00.0",
+        "desc": "Mill E Outlet Temperature",
+        "status": 0
+      },
+      {
+        "setValue": "5.84 °C",
+        "targetValue": "63.00 °C",
+        "currentValue": "57.16 °C",
+        "timestamp": "2022-02-02 10:23:00.0",
+        "desc": "Mill F Outlet Temperature",
+        "status": 0
+      },
+      {
+        "setValue": "47.39 t/h",
+        "targetValue": "833.53 t/h",
+        "currentValue": "786.14 t/h",
+        "timestamp": "2022-02-02 10:23:00.0",
+        "desc": "Total Secondary Air Flow",
+        "status": 0
+      },
+      {
+        "setValue": "54.72 t/h",
+        "targetValue": "1165.43 t/h",
+        "currentValue": "1110.71 t/h",
+        "timestamp": "2022-02-02 10:22:00.0",
+        "desc": "All Wind",
+        "status": 0
+      },
+      {
+        "setValue": "2.53 °",
+        "targetValue": "47.63 °",
+        "currentValue": "45.10 °",
+        "timestamp": "2022-02-02 10:22:00.0",
+        "desc": "Burner Tilt Position 0",
+        "status": 0
+      },
+      {
+        "setValue": "1.87 °",
+        "targetValue": "67.56 °",
+        "currentValue": "65.68 °",
+        "timestamp": "2022-02-02 10:22:00.0",
+        "desc": "Burner Tilt Position 1",
+        "status": 0
+      },
+      {
+        "setValue": "2.55 °",
+        "targetValue": "47.68 °",
+        "currentValue": "45.13 °",
+        "timestamp": "2022-02-02 10:22:00.0",
+        "desc": "Burner Tilt Position 2",
+        "status": 0
+      },
+      {
+        "setValue": "0.74 °",
+        "targetValue": "45.69 °",
+        "currentValue": "44.95 °",
+        "timestamp": "2022-02-02 10:22:00.0",
+        "desc": "Burner Tilt Position 3",
+        "status": 0
+      },
+      {
+        "setValue": "0.11 %",
+        "targetValue": "1.52 %",
+        "currentValue": "1.42 %",
+        "timestamp": "2022-02-02 10:22:00.0",
+        "desc": "Excess O2",
+        "status": 0
+      },
+      {
+        "setValue": "-1.37 °C",
+        "targetValue": "63.00 °C",
+        "currentValue": "64.37 °C",
+        "timestamp": "2022-02-02 10:22:00.0",
+        "desc": "Mill A Outlet Temperature",
+        "status": 0
+      },
+      {
+        "setValue": "-0.15 °C",
+        "targetValue": "63.00 °C",
+        "currentValue": "63.15 °C",
+        "timestamp": "2022-02-02 10:22:00.0",
+        "desc": "Mill B Outlet Temperature",
+        "status": 0
+      },
+      {
+        "setValue": "1.85 ° C",
+        "targetValue": "63.00 ° C",
+        "currentValue": "61.15 ° C",
+        "timestamp": "2022-02-02 10:22:00.0",
+        "desc": "Mill C Outlet Temperature",
+        "status": 0
+      },
+      {
+        "setValue": "4.02 °C",
+        "targetValue": "63.00 °C",
+        "currentValue": "58.98 °C",
+        "timestamp": "2022-02-02 10:22:00.0",
+        "desc": "Mill D Outlet Temperature",
+        "status": 0
+      },
+      {
+        "setValue": "-0.32 °C",
+        "targetValue": "63.00 °C",
+        "currentValue": "63.32 °C",
+        "timestamp": "2022-02-02 10:22:00.0",
+        "desc": "Mill E Outlet Temperature",
+        "status": 0
+      },
+      {
+        "setValue": "5.80 °C",
+        "targetValue": "63.00 °C",
+        "currentValue": "57.20 °C",
+        "timestamp": "2022-02-02 10:22:00.0",
+        "desc": "Mill F Outlet Temperature",
+        "status": 0
+      },
+      {
+        "setValue": "54.72 t/h",
+        "targetValue": "795.99 t/h",
+        "currentValue": "741.27 t/h",
+        "timestamp": "2022-02-02 10:22:00.0",
+        "desc": "Total Secondary Air Flow",
+        "status": 0
+      }
+    ],
+    "safeguard": 1
+  },
+  "message": "Success",
+  "total": 1,
+  "limit": 1,
+  "page": 0
+}
