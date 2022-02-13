@@ -14,7 +14,12 @@ _DB_NAME_ = db_config._DB_NAME_
 con = f"mysql+mysqlconnector://{_USER_}:{_PASS_}@{_IP_}/{_DB_NAME_}"
 
 def get_status():
-    keys = ['WatchdogStatus',db_config.SAFEGUARD_TAG,'TAGS_ENABLE_COPT']
+    keys = ['WatchdogStatus',db_config.SAFEGUARD_TAG,'TAG:ENABLE_COPT']
+    q = f"""SELECT f_tag_name FROM db_bat_rmb2.tb_tags_read_conf ttrc 
+            WHERE f_description = "Tag Enable COPT" """
+    try: keys[2] = pd.read_sql(q, con).values[0][0]
+    except Exception as e: print(f'Error on line 21: {e}')
+    
     q = f"""SELECT f_address_no, f_value FROM {_DB_NAME_}.tb_bat_raw tbr 
             WHERE f_address_no IN {tuple(keys)}"""
     df = pd.read_sql(q, con)
@@ -47,6 +52,7 @@ def get_recommendations():
     q = f"""SELECT ts AS timestamp, tag_name AS 'desc', value AS targetValue, bias_value AS setValue, value-bias_value AS currentValue FROM {_DB_NAME_}.tb_combustion_model_generation
             WHERE ts > (SELECT ts FROM {_DB_NAME_}.tb_combustion_model_generation
                         GROUP BY ts ORDER BY ts DESC LIMIT 4, 1)
+            AND ts > NOW() - INTERVAL 1 DAY
             ORDER BY ts DESC"""
     df = pd.read_sql(q, con)
     for c in df.columns[-3:]:
@@ -97,7 +103,7 @@ def get_tags_rule():
     df_dict = df.to_dict('records')
     return df_dict
 
-def get_object():
+def get_indicator():
     watchdog_status, safeguard_status, comb_enable_status = get_status()
     recommendations, last_recommendation = get_recommendations()
     comb_tags = get_comb_tags()

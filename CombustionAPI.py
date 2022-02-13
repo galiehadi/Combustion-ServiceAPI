@@ -3,7 +3,10 @@ from flask import Flask, request, jsonify
 from flask_cors import CORS
 from UiService import *
 from BackgroundService import *
+import logging
 
+log = logging.getLogger('werkzeug')
+log.setLevel(logging.ERROR)
 app = Flask(__name__)
 cors = CORS(app)
 debug_mode = False
@@ -18,7 +21,7 @@ def indicator():
         'page': 0,
     }
     try:
-        data['object'] = get_object()
+        data['object'] = get_indicator()
         data['message'] = 'Success'
     except Exception as E:
         data['object'] = []
@@ -178,6 +181,7 @@ def get_ml_recommendation():
         data['message'] = str(E)
     return data
 
+# ================================== Machine Learning Service ================================== #
 @app.route('/service/copt/bat/combustion/background/runner')
 def ml_runner():
     data = {
@@ -194,6 +198,8 @@ def ml_runner():
         data['object'] = []
         data['message'] = str(E)
     return data
+
+
 
 if __name__ == '__main__':
     if debug_mode:

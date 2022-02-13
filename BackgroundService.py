@@ -1,8 +1,10 @@
+from operator import index
 import pandas as pd
 import numpy as np
 import time, db_config, sqlalchemy, requests
 from urllib.parse import quote_plus as urlparse
 from pprint import pprint
+from regional_regressor import RegionalLinearReg
 
 _UNIT_CODE_ = db_config._UNIT_CODE_
 _UNIT_NAME_ = db_config._UNIT_NAME_
@@ -12,7 +14,21 @@ _IP_ = db_config._IP_
 _DB_NAME_ = db_config._DB_NAME_
 _LOCAL_IP_ = db_config._LOCAL_IP_
 
+# LOCAL_MODE = True
+# if LOCAL_MODE:
+#     _IP_ = 'localhost:3308'
+#     _LOCAL_IP_ = 'localhost'
+
+DEBUG_MODE = True
+dcs_x = [0, 150, 255, 300, 330]
+dcs_y = [8, 6.0, 4.5, 4.0, 4.0]
+DCS_O2 = RegionalLinearReg(dcs_x, dcs_y)
+
 con = f"mysql+mysqlconnector://{_USER_}:{_PASS_}@{_IP_}/{_DB_NAME_}"
+
+def logging(text):
+    t = time.strftime('%Y-%m-%d %X')
+    print(f"[{t}] - {text}")
 
 def bg_safeguard_check():
     t0 = time.time()
@@ -61,9 +77,46 @@ def bg_safeguard_update():
 
     q = f"""UPDATE {_DB_NAME_}.tb_bat_raw SET f_date_rec=NOW(), f_value={1 if Safeguard_status else 0}, f_updated_at=NOW()
             WHERE f_address_no = "{db_config.SAFEGUARD_TAG}" """
-
     with engine.connect() as conn:
         res = conn.execute(q)
+
+    # Update Tag Enable COPT to False if 
+    if not ret['Safeguard Status']:
+        O2_tag, GrossMW_tag, COPTenable_name = ['excess_o2', 'generator_gross_load', 'Tag Enable COPT']
+        q = f"""UPDATE db_bat_rmb2.tb_bat_raw SET f_date_rec = NOW(), f_value = 0, f_updated_at = NOW()
+                WHERE f_address_no = (SELECT conf.f_tag_name FROM db_bat_rmb2.tb_tags_read_conf conf
+                                    WHERE f_description = "Tag Enable COPT")"""
+                                    
+        q2= f"""SELECT NOW() AS f_date_rec, disp.f_desc , raw.f_value FROM db_bat_rmb2.cb_display disp
+                LEFT JOIN db_bat_rmb2.tb_bat_raw raw
+                ON disp.f_tags = raw.f_address_no 
+                WHERE disp.f_desc IN ("{O2_tag}", "{GrossMW_tag}")
+                UNION
+                SELECT NOW() AS f_date_rec, conf.f_description AS f_desc, raw.f_value FROM db_bat_rmb2.tb_tags_read_conf conf
+                LEFT JOIN  db_bat_rmb2.tb_bat_raw raw
+                ON raw.f_address_no = conf.f_tag_name 
+                WHERE conf.f_description = "{COPTenable_name}" """
+        df = pd.read_sql(q2,con).pivot_table(index='f_date_rec', columns='f_desc', values='f_value')
+        ts = df.index.max()
+        o2_current = df[O2_tag].max()
+        mw_current = df[GrossMW_tag].max()
+        copt_enable = df[COPTenable_name].max()
+        o2_bias = o2_current - DCS_O2.predict(mw_current)
+
+        q3= f"""SELECT f_tag_name FROM db_bat_rmb2.tb_tags_read_conf conf
+                WHERE f_description = "Excess Oxygen Sensor" """
+        o2_recom_tag = pd.read_sql(q3, con).values[0][0]
+        
+        if copt_enable:
+            logging('Some of safeguards are violated. Turning off COPT ...')
+            with engine.connect() as conn:
+                res = conn.execute(q)
+            opc_write = [[o2_recom_tag, ts, o2_bias]]
+            opc_write = pd.DataFrame(opc_write, columns=['tag_name','ts','value'])
+            
+            opc_write.to_sql('tb_opc_write', con, if_exists='append', index=False)
+            opc_write.to_sql('tb_opc_write_history', con, if_exists='append', index=False)
+            
     return ret
 
 def bg_get_recom_exec_interval():
@@ -73,66 +126,105 @@ def bg_get_recom_exec_interval():
     recom_exec_interval = float(df.values)
     return recom_exec_interval
 
-def bg_machine_learning_update():
-    response = requests.get(f'http://{_LOCAL_IP_}:5002/bat_combustion/RBG1/realtime')
-    ret = response.text
-    return ret
-
 def bg_get_ml_recommendation():
     try:
         response = requests.get(f'http://{_LOCAL_IP_}:5002/bat_combustion/RBG1/realtime')
-        ret = response.text
+        ret = response.json()
         return ret
     except Exception as e:
-        print(time.ctime(),'- Machine learning prediction error:', e)
+        logging(time.ctime(),'- Machine learning prediction error:', e)
         return str(e)
 
 def bg_ml_runner():
-    # Get CombustionEnable status
-    q = f"""SELECT raw.f_value FROM {_DB_NAME_}.tb_combustion_parameters param 
-            LEFT JOIN {_DB_NAME_}.tb_bat_raw_history raw
-            ON param.f_default_value = raw.f_address_no 
-            WHERE param.f_label = "TAG_ENABLE_COPT"
-            ORDER BY raw.f_date_rec DESC LIMIT 2 """
-    df = pd.read_sql(q, con)
-    ENABLE_COPT, LAST_ENABLE_COPT = df.T.astype(bool).values[0]
-    FIRST_ENABLED = 1 if (not LAST_ENABLE_COPT and ENABLE_COPT) else 0
+    ENABLE_COPT = 0
     MAX_BIAS_PERCENTAGE = 5
-    OPC_COLUMNS = 'bias_value'
+    RECOM_EXEC_INTERVAL = 15
+    LATEST_RECOMMENDATION_TIME = pd.to_datetime('2020-01-01 00:00')
 
-    # Harusnya if ENABLE_COPT
-    if not ENABLE_COPT:
-        q = f"""SELECT gen.model_id, gen.ts, conf.f_tag_name, gen.bias_value, 
-                gen.value, gen.value - gen.bias_value AS original_value 
-                FROM {_DB_NAME_}.tb_combustion_model_generation gen
-                LEFT JOIN {_DB_NAME_}.tb_tags_read_conf conf
-                ON gen.tag_name = conf.f_description 
-                WHERE gen.ts = (SELECT MAX(ts) FROM {_DB_NAME_}.tb_combustion_model_generation)"""
+    t0 = time.time()
+
+    # Get Enable status
+    q = f"""SELECT raw.f_value FROM {_DB_NAME_}.tb_combustion_parameters param
+            LEFT JOIN {_DB_NAME_}.tb_bat_raw raw
+            ON param.f_default_value = raw.f_address_no
+            WHERE param.f_label = "TAG_ENABLE_COPT" """
+    df = pd.read_sql(q, con)
+    ENABLE_COPT = df.values[0][0]
+
+    # Get parameters
+    q = f"""SELECT f_label, f_default_value FROM {_DB_NAME_}.tb_combustion_parameters tcp 
+            WHERE f_label IN ("MAX_BIAS_PERCENTAGE","SEND_VALUE_TO_OPC","RECOM_EXEC_INTERVAL") """
+    parameters = pd.read_sql(q, con).set_index('f_label')['f_default_value']
+
+    if 'MAX_BIAS_PERCENTAGE' in parameters.index:
+        MAX_BIAS_PERCENTAGE = float(parameters['MAX_BIAS_PERCENTAGE'])
+    if 'RECOM_EXEC_INTERVAL' in parameters.index:
+        RECOM_EXEC_INTERVAL = int(parameters['RECOM_EXEC_INTERVAL'])
+    
+    if DEBUG_MODE:
+        # Get latest recommendations time
+        q = f"""SELECT MAX(ts) FROM {_DB_NAME_}.tb_combustion_model_generation"""
         df = pd.read_sql(q, con)
+        try: LATEST_RECOMMENDATION_TIME = pd.to_datetime(df.values[0][0])
+        except Exception as e: logging(f"Error on line 130:", str(e)) 
+
+        now = pd.to_datetime(time.ctime())
+        if (now - LATEST_RECOMMENDATION_TIME) < pd.Timedelta(f'{RECOM_EXEC_INTERVAL}min'):
+            return
         
-        # TODO: Check latest ts OPC
+        # Calling ML Recommendations to the latest recommendation
+        val = bg_get_ml_recommendation()
+    
+    elif ENABLE_COPT:
+        # Get latest recommendations time
+        q = f"""SELECT MAX(ts) FROM {_DB_NAME_}.tb_combustion_model_generation"""
+        df = pd.read_sql(q, con)
+        try: LATEST_RECOMMENDATION_TIME = pd.to_datetime(df.values[0][0])
+        except Exception as e: logging(f"Error on line 145:", str(e)) 
+
+        now = pd.to_datetime(time.ctime())
+        # TEMPORARY! 
+        if (now - LATEST_RECOMMENDATION_TIME) < pd.Timedelta(f'{RECOM_EXEC_INTERVAL}min'):
+            return {'message:': str(LATEST_RECOMMENDATION_TIME)}
         
-        # #
+        # Calling ML Recommendations to the latest recommendation
+        ML = bg_get_ml_recommendation()
+        if type(ML) is not dict: return ML
 
-        q = f"""SELECT f_default_value FROM db_bat_rmb2.tb_combustion_parameters tcp 
-                WHERE f_label IN ("MAX_BIAS_PERCENTAGE","SEND_VALUE_TO_OPC") """
+        if ML['model_status'] == 1:
+            # Limit recommendations to +- MAX_BIAS_PERCENTAGE %
+            q = f"""SELECT gen.model_id, gen.ts, conf.f_tag_name, conf.f_description, 
+                    gen.value, gen.bias_value, gen.enable_status, gen.value - gen.bias_value AS 'current_value' 
+                    FROM {_DB_NAME_}.tb_tags_read_conf conf
+                    LEFT JOIN {_DB_NAME_}.tb_combustion_model_generation gen
+                    ON conf.f_description = gen.tag_name 
+                    WHERE f_category = "Recommendation"
+                    AND gen.ts = (SELECT MAX(ts) FROM {_DB_NAME_}.tb_combustion_model_generation tcmg)"""
+            Recom = pd.read_sql(q, con)
+            
+            o2_idx = None
+            # TODO: Limit recommendation to MAX_BIAS_PERCENTAGE %
+            for i in Recom.index:
+                mxv = MAX_BIAS_PERCENTAGE * abs(Recom.loc[i, 'current_value']) / 100
+                Recom.loc[i, 'bias_value'] = max(-mxv, Recom.loc[i, 'bias_value'])
+                Recom.loc[i, 'bias_value'] = min(mxv, Recom.loc[i, 'bias_value'])
+                if 'Oxygen' in Recom.loc[i, 'f_description']: o2_idx = i
+            Recom['value'] = Recom['current_value'] + Recom['bias_value']
+            
+            # Calculate O2 Set Point based on GrossMW from DCS
+            q = f"""SELECT f_value FROM {_DB_NAME_}.cb_display disp
+                    LEFT JOIN {_DB_NAME_}.tb_bat_raw raw
+                    on disp.f_tags = raw.f_address_no 
+                    WHERE f_desc = "generator_gross_load" """
+            dcs_mw = pd.read_sql(q, con).values[0][0]
+            dcs_o2 = DCS_O2.predict(dcs_mw)
 
-        try: MAX_BIAS_PERCENTAGE, OPC_COLUMNS = float(pd.read_sql(q, con).T.values[0])
-        except: pass
-        
-        for i in df.index:
-            df.loc[i, 'bias_value'] = max((0-MAX_BIAS_PERCENTAGE*0.01) * df.loc[i, 'original_value'], df.loc[i, 'bias_value'])
-            df.loc[i, 'bias_value'] = min((0+MAX_BIAS_PERCENTAGE*0.01) * df.loc[i, 'original_value'], df.loc[i, 'bias_value'])
-        df['value'] = df['original_value'] + df['bias_value']
-        
-        opc_write = df[['f_tag_name','ts',OPC_COLUMNS]]
-        opc_write.columns = ['tag_name','ts','value']
-
-        opc_write.to_sql('tb_opc_write', con=con, if_exists='append', index=False)
-        opc_write.to_sql('tb_opc_write_history', con=con, if_exists='append', index=False)
-        
-
-    return ENABLE_COPT, LAST_ENABLE_COPT
-
-
-print(bg_ml_runner())
+            opc_write = Recom[['f_tag_name','ts','value']]
+            opc_write.columns = ['tag_name','ts','value']
+            
+            if o2_idx is not None:
+                opc_write.loc[o2_idx, 'value'] = opc_write.loc[o2_idx, 'value'] - dcs_o2
+            
+            opc_write.to_sql('tb_opc_write', con, if_exists='append', index=False)
+            opc_write.to_sql('tb_opc_write_history', con, if_exists='append', index=False)
+            return 'Done!'
