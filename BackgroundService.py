@@ -19,12 +19,14 @@ _LOCAL_IP_ = db_config._LOCAL_IP_
 #     _IP_ = 'localhost:3308'
 #     _LOCAL_IP_ = 'localhost'
 
+# Default values
 DEBUG_MODE = True
 dcs_x = [0, 150, 255, 300, 330]
 dcs_y = [8, 6.0, 4.5, 4.0, 4.0]
 DCS_O2 = RegionalLinearReg(dcs_x, dcs_y)
 
 con = f"mysql+mysqlconnector://{_USER_}:{_PASS_}@{_IP_}/{_DB_NAME_}"
+engine = sqlalchemy.create_engine(con)
 
 def logging(text):
     t = time.strftime('%Y-%m-%d %X')
@@ -72,8 +74,6 @@ def bg_safeguard_check():
 def bg_safeguard_update():
     ret = bg_safeguard_check()
     Safeguard_status = ret['Safeguard Status']
-    
-    engine = sqlalchemy.create_engine(con)
 
     q = f"""UPDATE {_DB_NAME_}.tb_bat_raw SET f_date_rec=NOW(), f_value={1 if Safeguard_status else 0}, f_updated_at=NOW()
             WHERE f_address_no = "{db_config.SAFEGUARD_TAG}" """
@@ -83,17 +83,17 @@ def bg_safeguard_update():
     # Update Tag Enable COPT to False if 
     if not ret['Safeguard Status']:
         O2_tag, GrossMW_tag, COPTenable_name = ['excess_o2', 'generator_gross_load', 'Tag Enable COPT']
-        q = f"""UPDATE db_bat_rmb2.tb_bat_raw SET f_date_rec = NOW(), f_value = 0, f_updated_at = NOW()
-                WHERE f_address_no = (SELECT conf.f_tag_name FROM db_bat_rmb2.tb_tags_read_conf conf
+        q = f"""UPDATE {_DB_NAME_}.tb_bat_raw SET f_date_rec = NOW(), f_value = 0, f_updated_at = NOW()
+                WHERE f_address_no = (SELECT conf.f_tag_name FROM {_DB_NAME_}.tb_tags_read_conf conf
                                     WHERE f_description = "Tag Enable COPT")"""
                                     
-        q2= f"""SELECT NOW() AS f_date_rec, disp.f_desc , raw.f_value FROM db_bat_rmb2.cb_display disp
-                LEFT JOIN db_bat_rmb2.tb_bat_raw raw
+        q2= f"""SELECT NOW() AS f_date_rec, disp.f_desc , raw.f_value FROM {_DB_NAME_}.cb_display disp
+                LEFT JOIN {_DB_NAME_}.tb_bat_raw raw
                 ON disp.f_tags = raw.f_address_no 
                 WHERE disp.f_desc IN ("{O2_tag}", "{GrossMW_tag}")
                 UNION
-                SELECT NOW() AS f_date_rec, conf.f_description AS f_desc, raw.f_value FROM db_bat_rmb2.tb_tags_read_conf conf
-                LEFT JOIN  db_bat_rmb2.tb_bat_raw raw
+                SELECT NOW() AS f_date_rec, conf.f_description AS f_desc, raw.f_value FROM {_DB_NAME_}.tb_tags_read_conf conf
+                LEFT JOIN  {_DB_NAME_}.tb_bat_raw raw
                 ON raw.f_address_no = conf.f_tag_name 
                 WHERE conf.f_description = "{COPTenable_name}" """
         df = pd.read_sql(q2,con).pivot_table(index='f_date_rec', columns='f_desc', values='f_value')
@@ -103,7 +103,7 @@ def bg_safeguard_update():
         copt_enable = df[COPTenable_name].max()
         o2_bias = o2_current - DCS_O2.predict(mw_current)
 
-        q3= f"""SELECT f_tag_name FROM db_bat_rmb2.tb_tags_read_conf conf
+        q3= f"""SELECT f_tag_name FROM {_DB_NAME_}.tb_tags_read_conf conf
                 WHERE f_description = "Excess Oxygen Sensor" """
         o2_recom_tag = pd.read_sql(q3, con).values[0][0]
         
@@ -128,7 +128,7 @@ def bg_get_recom_exec_interval():
 
 def bg_get_ml_recommendation():
     try:
-        response = requests.get(f'http://{_LOCAL_IP_}:5002/bat_combustion/RBG1/realtime')
+        response = requests.get(f'http://{_LOCAL_IP_}:5002/bat_combustion/{_UNIT_CODE_}/realtime')
         ret = response.json()
         return ret
     except Exception as e:
@@ -153,13 +153,15 @@ def bg_ml_runner():
 
     # Get parameters
     q = f"""SELECT f_label, f_default_value FROM {_DB_NAME_}.tb_combustion_parameters tcp 
-            WHERE f_label IN ("MAX_BIAS_PERCENTAGE","SEND_VALUE_TO_OPC","RECOM_EXEC_INTERVAL") """
+            WHERE f_label IN ("MAX_BIAS_PERCENTAGE","RECOM_EXEC_INTERVAL","DEBUG_MODE") """
     parameters = pd.read_sql(q, con).set_index('f_label')['f_default_value']
 
     if 'MAX_BIAS_PERCENTAGE' in parameters.index:
         MAX_BIAS_PERCENTAGE = float(parameters['MAX_BIAS_PERCENTAGE'])
     if 'RECOM_EXEC_INTERVAL' in parameters.index:
         RECOM_EXEC_INTERVAL = int(parameters['RECOM_EXEC_INTERVAL'])
+    if 'DEBUG_MODE' in parameters.index:
+        DEBUG_MODE = False if (parameters['RECOM_EXEC_INTERVAL'].lower() == 'false') else True
     
     if DEBUG_MODE:
         # Get latest recommendations time
@@ -173,7 +175,31 @@ def bg_ml_runner():
             return
         
         # Calling ML Recommendations to the latest recommendation
-        val = bg_get_ml_recommendation()
+        # TODO: Set latest COPT call based on timestamp
+        q = f"""SELECT f_date_rec, f_value FROM {_DB_NAME_}.tb_bat_raw
+                WHERE f_address_no = "TAG:COPT_is_calling" """
+        copt_is_calling_timestamp, copt_is_calling = pd.read_sql(q, con).values[0]
+        if not copt_is_calling:
+            logging('Calling COPT ...')
+            q = f"""UPDATE {_DB_NAME_}.tb_bat_raw
+                    SET f_value=1,f_date_rec=NOW(),f_updated_at=NOW()
+                    WHERE f_address_no='TAG:COPT_is_calling' """
+            with engine.connect() as conn:
+                res = conn.execute(q)
+            val = bg_get_ml_recommendation()
+
+            q = f"""UPDATE {_DB_NAME_}.tb_bat_raw
+                    SET f_value=0,f_date_rec=NOW(),f_updated_at=NOW()
+                    WHERE f_address_no='TAG:COPT_is_calling' """
+            with engine.connect() as conn:
+                res = conn.execute(q)
+        elif (now - copt_is_calling_timestamp) > pd.Timedelta('60sec'):
+            # Set back COPT_is_calling to 0 if last update > 60 sec ago.
+            q = f"""UPDATE {_DB_NAME_}.tb_bat_raw
+                    SET f_value=0,f_date_rec=NOW(),f_updated_at=NOW()
+                    WHERE f_address_no='TAG:COPT_is_calling' """
+            with engine.connect() as conn:
+                res = conn.execute(q)
     
     elif ENABLE_COPT:
         # Get latest recommendations time

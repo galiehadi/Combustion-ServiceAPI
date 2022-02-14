@@ -5,8 +5,8 @@ from UiService import *
 from BackgroundService import *
 import logging
 
-log = logging.getLogger('werkzeug')
-log.setLevel(logging.ERROR)
+# log = logging.getLogger('werkzeug')
+# log.setLevel(logging.ERROR)
 app = Flask(__name__)
 cors = CORS(app)
 debug_mode = False
