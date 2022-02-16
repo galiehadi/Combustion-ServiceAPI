@@ -21,15 +21,15 @@ def indicator():
         'limit': 1,
         'page': 0,
     }
-    data = jsonify(data)
-    data.headers.add('Access-Control-Allow-Origin', '*')
     try:
         data['object'] = get_indicator()
         data['message'] = 'Success'
     except Exception as E:
         data['object'] = []
         data['message'] = str(E)
-    return jsonify(data)
+    data = jsonify(data)
+    data.headers.add('Access-Control-Allow-Origin', '*')
+    return data
 
 @app.route('/service/copt/bat/combustion/alarm-history')
 def alarm_history():
