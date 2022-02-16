@@ -1,6 +1,7 @@
 from distutils.log import debug
 from flask import Flask, request, jsonify
 from flask_cors import CORS
+from itsdangerous import json
 from UiService import *
 from BackgroundService import *
 import logging
@@ -8,7 +9,7 @@ import logging
 # log = logging.getLogger('werkzeug')
 # log.setLevel(logging.ERROR)
 app = Flask(__name__)
-cors = CORS(app)
+cors = CORS(app, supports_credentials=True)
 debug_mode = False
 
 # ================================== Service UI ================================== #
@@ -20,6 +21,8 @@ def indicator():
         'limit': 1,
         'page': 0,
     }
+    data = jsonify(data)
+    data.headers.add('Access-Control-Allow-Origin', '*')
     try:
         data['object'] = get_indicator()
         data['message'] = 'Success'

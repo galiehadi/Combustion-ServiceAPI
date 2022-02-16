@@ -161,7 +161,7 @@ def bg_ml_runner():
     if 'RECOM_EXEC_INTERVAL' in parameters.index:
         RECOM_EXEC_INTERVAL = int(parameters['RECOM_EXEC_INTERVAL'])
     if 'DEBUG_MODE' in parameters.index:
-        DEBUG_MODE = False if (parameters['RECOM_EXEC_INTERVAL'].lower() == 'false') else True
+        DEBUG_MODE = False if (parameters['RECOM_EXEC_INTERVAL'].lower() in ['0','false',0]) else True
     
     if DEBUG_MODE:
         # Get latest recommendations time
