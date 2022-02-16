@@ -35,7 +35,10 @@ def get_comb_tags():
             ON cd.f_tags = tbr.f_address_no 
             ORDER BY cd.f_desc ASC"""
     df = pd.read_sql(q, con)
-    df = df.set_index('f_desc').round(2)
+    df['f_value'] = df['f_value'].astype(str)
+    df = df.replace('None',0)
+    df = df.set_index('f_desc')
+    df['f_value'] = df['f_value'].astype(float).round(2)
     df['f_value'] = df['f_value'].astype(str) + ' ' + df['f_units']
     df = df.to_dict()
     df = df['f_value']
