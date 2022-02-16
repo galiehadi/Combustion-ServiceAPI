@@ -8,7 +8,7 @@ import logging
 # log = logging.getLogger('werkzeug')
 # log.setLevel(logging.ERROR)
 app = Flask(__name__)
-cors = CORS(app)
+cors = CORS(app, supports_credentials=True)
 debug_mode = False
 
 # ================================== Service UI ================================== #
@@ -20,6 +20,8 @@ def indicator():
         'limit': 1,
         'page': 0,
     }
+    data = jsonify(data)
+    data.headers.add('Access-Control-Allow-Origin', '*')
     try:
         data['object'] = get_indicator()
         data['message'] = 'Success'
