@@ -1,23 +1,24 @@
 from operator import index
 import pandas as pd
 import numpy as np
-import time, db_config, sqlalchemy, requests
+import time, sqlalchemy, requests, config
 from urllib.parse import quote_plus as urlparse
 from pprint import pprint
 from regional_regressor import RegionalLinearReg
 
-_UNIT_CODE_ = db_config._UNIT_CODE_
-_UNIT_NAME_ = db_config._UNIT_NAME_
-_USER_ = db_config._USER_
-_PASS_ = urlparse(db_config._PASS_)
-_IP_ = db_config._IP_
-_DB_NAME_ = db_config._DB_NAME_
-_LOCAL_IP_ = db_config._LOCAL_IP_
+_UNIT_CODE_ = config._UNIT_CODE_
+_UNIT_NAME_ = config._UNIT_NAME_
+_USER_ = config._USER_
+_PASS_ = urlparse(config._PASS_)
+_IP_ = config._IP_
+_DB_NAME_ = config._DB_NAME_
+_LOCAL_IP_ = config._LOCAL_IP_
+_LOCAL_MODE_ = False
 
-# LOCAL_MODE = True
-# if LOCAL_MODE:
-#     _IP_ = 'localhost:3308'
-#     _LOCAL_IP_ = 'localhost'
+_LOCAL_MODE_ = True
+if _LOCAL_MODE_:
+    _IP_ = 'localhost:3308'
+    _LOCAL_IP_ = 'localhost'
 
 # Default values
 DEBUG_MODE = True
@@ -76,16 +77,16 @@ def bg_safeguard_update():
     Safeguard_status = ret['Safeguard Status']
 
     q = f"""UPDATE {_DB_NAME_}.tb_bat_raw SET f_date_rec=NOW(), f_value={1 if Safeguard_status else 0}, f_updated_at=NOW()
-            WHERE f_address_no = "{db_config.SAFEGUARD_TAG}" """
+            WHERE f_address_no = "{config.SAFEGUARD_TAG}" """
     with engine.connect() as conn:
         res = conn.execute(q)
 
     # Update Tag Enable COPT to False if 
     if not ret['Safeguard Status']:
-        O2_tag, GrossMW_tag, COPTenable_name = ['excess_o2', 'generator_gross_load', 'Tag Enable COPT']
+        O2_tag, GrossMW_tag, COPTenable_name = ['excess_o2', 'generator_gross_load', config.DESC_ENABLE_COPT]
         q = f"""UPDATE {_DB_NAME_}.tb_bat_raw SET f_date_rec = NOW(), f_value = 0, f_updated_at = NOW()
                 WHERE f_address_no = (SELECT conf.f_tag_name FROM {_DB_NAME_}.tb_tags_read_conf conf
-                                    WHERE f_description = "Tag Enable COPT")"""
+                                    WHERE f_description = "{config.DESC_ENABLE_COPT}")"""
                                     
         q2= f"""SELECT NOW() AS f_date_rec, disp.f_desc , raw.f_value FROM {_DB_NAME_}.cb_display disp
                 LEFT JOIN {_DB_NAME_}.tb_bat_raw raw
@@ -144,10 +145,10 @@ def bg_ml_runner():
     t0 = time.time()
 
     # Get Enable status
-    q = f"""SELECT raw.f_value FROM {_DB_NAME_}.tb_combustion_parameters param
-            LEFT JOIN {_DB_NAME_}.tb_bat_raw raw
-            ON param.f_default_value = raw.f_address_no
-            WHERE param.f_label = "TAG_ENABLE_COPT" """
+    q = f"""SELECT raw.f_value FROM db_bat_rmb1.tb_tags_read_conf conf
+            LEFT JOIN db_bat_rmb1.tb_bat_raw raw
+            ON conf.f_tag_name = raw.f_address_no 
+            WHERE conf.f_description = "{config.DESC_ENABLE_COPT}" """
     df = pd.read_sql(q, con)
     ENABLE_COPT = df.values[0][0]
 
@@ -155,6 +156,9 @@ def bg_ml_runner():
     q = f"""SELECT f_label, f_default_value FROM {_DB_NAME_}.tb_combustion_parameters tcp 
             WHERE f_label IN ("MAX_BIAS_PERCENTAGE","RECOM_EXEC_INTERVAL","DEBUG_MODE") """
     parameters = pd.read_sql(q, con).set_index('f_label')['f_default_value']
+
+    print('Parameters:')
+    print(parameters)
 
     if 'MAX_BIAS_PERCENTAGE' in parameters.index:
         MAX_BIAS_PERCENTAGE = float(parameters['MAX_BIAS_PERCENTAGE'])
@@ -170,6 +174,7 @@ def bg_ml_runner():
         try: LATEST_RECOMMENDATION_TIME = pd.to_datetime(df.values[0][0])
         except Exception as e: logging(f"Error on line 130:", str(e)) 
 
+        # Return if latest recommendation is under RECOM_EXEC_INTERVAL minute
         now = pd.to_datetime(time.ctime())
         if (now - LATEST_RECOMMENDATION_TIME) < pd.Timedelta(f'{RECOM_EXEC_INTERVAL}min'):
             return
@@ -177,27 +182,27 @@ def bg_ml_runner():
         # Calling ML Recommendations to the latest recommendation
         # TODO: Set latest COPT call based on timestamp
         q = f"""SELECT f_date_rec, f_value FROM {_DB_NAME_}.tb_bat_raw
-                WHERE f_address_no = "TAG:COPT_is_calling" """
+                WHERE f_address_no = "{config.TAG_COPT_ISCALLING}" """
         copt_is_calling_timestamp, copt_is_calling = pd.read_sql(q, con).values[0]
         if not copt_is_calling:
             logging('Calling COPT ...')
             q = f"""UPDATE {_DB_NAME_}.tb_bat_raw
                     SET f_value=1,f_date_rec=NOW(),f_updated_at=NOW()
-                    WHERE f_address_no='TAG:COPT_is_calling' """
+                    WHERE f_address_no='{config.TAG_COPT_ISCALLING}' """
             with engine.connect() as conn:
                 res = conn.execute(q)
             val = bg_get_ml_recommendation()
 
             q = f"""UPDATE {_DB_NAME_}.tb_bat_raw
                     SET f_value=0,f_date_rec=NOW(),f_updated_at=NOW()
-                    WHERE f_address_no='TAG:COPT_is_calling' """
+                    WHERE f_address_no='{config.TAG_COPT_ISCALLING}' """
             with engine.connect() as conn:
                 res = conn.execute(q)
         elif (now - copt_is_calling_timestamp) > pd.Timedelta('60sec'):
             # Set back COPT_is_calling to 0 if last update > 60 sec ago.
             q = f"""UPDATE {_DB_NAME_}.tb_bat_raw
                     SET f_value=0,f_date_rec=NOW(),f_updated_at=NOW()
-                    WHERE f_address_no='TAG:COPT_is_calling' """
+                    WHERE f_address_no='{config.TAG_COPT_ISCALLING}' """
             with engine.connect() as conn:
                 res = conn.execute(q)
     
@@ -206,7 +211,7 @@ def bg_ml_runner():
         q = f"""SELECT MAX(ts) FROM {_DB_NAME_}.tb_combustion_model_generation"""
         df = pd.read_sql(q, con)
         try: LATEST_RECOMMENDATION_TIME = pd.to_datetime(df.values[0][0])
-        except Exception as e: logging(f"Error on line 145:", str(e)) 
+        except Exception as e: logging(f"Error on line 209:", str(e)) 
 
         now = pd.to_datetime(time.ctime())
         # TEMPORARY! 
@@ -215,7 +220,9 @@ def bg_ml_runner():
         
         # Calling ML Recommendations to the latest recommendation
         ML = bg_get_ml_recommendation()
-        if type(ML) is not dict: return ML
+        if type(ML) is not dict: 
+            print('Error on ML response. Columns "model_status" not found.')
+            return ML
 
         if ML['model_status'] == 1:
             # Limit recommendations to +- MAX_BIAS_PERCENTAGE %
@@ -254,3 +261,7 @@ def bg_ml_runner():
             opc_write.to_sql('tb_opc_write', con, if_exists='append', index=False)
             opc_write.to_sql('tb_opc_write_history', con, if_exists='append', index=False)
             return 'Done!'
+
+if _LOCAL_MODE_:
+    k = bg_ml_runner()
+    print(time.strftime('%X'), k)
