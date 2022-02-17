@@ -15,10 +15,10 @@ _DB_NAME_ = config._DB_NAME_
 _LOCAL_IP_ = config._LOCAL_IP_
 _LOCAL_MODE_ = False
 
-_LOCAL_MODE_ = True
-if _LOCAL_MODE_:
-    _IP_ = 'localhost:3308'
-    _LOCAL_IP_ = 'localhost'
+# _LOCAL_MODE_ = True
+# if _LOCAL_MODE_:
+#     _IP_ = 'localhost:3308'
+#     _LOCAL_IP_ = 'localhost'
 
 # Default values
 DEBUG_MODE = True
@@ -145,8 +145,8 @@ def bg_ml_runner():
     t0 = time.time()
 
     # Get Enable status
-    q = f"""SELECT raw.f_value FROM db_bat_rmb1.tb_tags_read_conf conf
-            LEFT JOIN db_bat_rmb1.tb_bat_raw raw
+    q = f"""SELECT raw.f_value FROM {_DB_NAME_}.tb_tags_read_conf conf
+            LEFT JOIN {_DB_NAME_}.tb_bat_raw raw
             ON conf.f_tag_name = raw.f_address_no 
             WHERE conf.f_description = "{config.DESC_ENABLE_COPT}" """
     df = pd.read_sql(q, con)
@@ -156,9 +156,6 @@ def bg_ml_runner():
     q = f"""SELECT f_label, f_default_value FROM {_DB_NAME_}.tb_combustion_parameters tcp 
             WHERE f_label IN ("MAX_BIAS_PERCENTAGE","RECOM_EXEC_INTERVAL","DEBUG_MODE") """
     parameters = pd.read_sql(q, con).set_index('f_label')['f_default_value']
-
-    print('Parameters:')
-    print(parameters)
 
     if 'MAX_BIAS_PERCENTAGE' in parameters.index:
         MAX_BIAS_PERCENTAGE = float(parameters['MAX_BIAS_PERCENTAGE'])
@@ -177,7 +174,7 @@ def bg_ml_runner():
         # Return if latest recommendation is under RECOM_EXEC_INTERVAL minute
         now = pd.to_datetime(time.ctime())
         if (now - LATEST_RECOMMENDATION_TIME) < pd.Timedelta(f'{RECOM_EXEC_INTERVAL}min'):
-            return
+            return f"Waiting to next {now + pd.Timedelta(f'{RECOM_EXEC_INTERVAL}min') - LATEST_RECOMMENDATION_TIME} min"
         
         # Calling ML Recommendations to the latest recommendation
         # TODO: Set latest COPT call based on timestamp
@@ -264,4 +261,4 @@ def bg_ml_runner():
 
 if _LOCAL_MODE_:
     k = bg_ml_runner()
-    print(time.strftime('%X'), k)
+    print(time.strftime('%X\t'), k)
