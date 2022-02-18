@@ -127,11 +127,79 @@ def bg_get_recom_exec_interval():
     recom_exec_interval = float(df.values)
     return recom_exec_interval
 
+def bg_write_recommendation_to_opc(MAX_BIAS_PERCENTAGE):
+    # Limit recommendations to +- MAX_BIAS_PERCENTAGE %
+    q = f"""SELECT gen.model_id, gen.ts, conf.f_tag_name, conf.f_description, 
+            gen.value, gen.bias_value, gen.enable_status, gen.value - gen.bias_value AS 'current_value' 
+            FROM {_DB_NAME_}.tb_tags_read_conf conf
+            LEFT JOIN {_DB_NAME_}.tb_combustion_model_generation gen
+            ON conf.f_description = gen.tag_name 
+            WHERE f_category = "Recommendation"
+            AND gen.ts = (SELECT MAX(ts) FROM {_DB_NAME_}.tb_combustion_model_generation tcmg)"""
+    Recom = pd.read_sql(q, con)
+    
+    o2_idx = None
+    # Limit recommendation to MAX_BIAS_PERCENTAGE %
+    for i in Recom.index:
+        mxv = MAX_BIAS_PERCENTAGE * abs(Recom.loc[i, 'current_value']) / 100
+        Recom.loc[i, 'bias_value'] = max(-mxv, Recom.loc[i, 'bias_value'])
+        Recom.loc[i, 'bias_value'] = min(mxv, Recom.loc[i, 'bias_value'])
+        if 'Oxygen' in Recom.loc[i, 'f_description']: o2_idx = i
+    Recom['value'] = Recom['current_value'] + Recom['bias_value']
+    
+    # Calculate O2 Set Point based on GrossMW from DCS
+    q = f"""SELECT f_value FROM {_DB_NAME_}.cb_display disp
+            LEFT JOIN {_DB_NAME_}.tb_bat_raw raw
+            on disp.f_tags = raw.f_address_no 
+            WHERE f_desc = "generator_gross_load" """
+    dcs_mw = pd.read_sql(q, con).values[0][0]
+    dcs_o2 = DCS_O2.predict(dcs_mw)
+
+    opc_write = Recom[['f_tag_name','ts','value']]
+    opc_write.columns = ['tag_name','ts','value']
+    
+    if o2_idx is not None:
+        opc_write.loc[o2_idx, 'value'] = opc_write.loc[o2_idx, 'value'] - dcs_o2
+    
+    opc_write.to_sql('tb_opc_write', con, if_exists='append', index=False)
+    opc_write.to_sql('tb_opc_write_history', con, if_exists='append', index=False)
+    logging(f'Write to OPC: {opc_write}')
+    return 'Done!'
+
 def bg_get_ml_recommendation():
     try:
-        response = requests.get(f'http://{_LOCAL_IP_}:5002/bat_combustion/{_UNIT_CODE_}/realtime')
-        ret = response.json()
-        return ret
+        now = pd.to_datetime(time.ctime())
+
+        # Calling ML Recommendations to the latest recommendation
+        # TODO: Set latest COPT call based on timestamp
+        q = f"""SELECT f_date_rec, f_value FROM {_DB_NAME_}.tb_bat_raw
+                WHERE f_address_no = "{config.TAG_COPT_ISCALLING}" """
+        copt_is_calling_timestamp, copt_is_calling = pd.read_sql(q, con).values[0]
+        if not copt_is_calling:
+            logging('Calling COPT ...')
+            q = f"""UPDATE {_DB_NAME_}.tb_bat_raw
+                    SET f_value=1,f_date_rec=NOW(),f_updated_at=NOW()
+                    WHERE f_address_no='{config.TAG_COPT_ISCALLING}' """
+            with engine.connect() as conn:
+                res = conn.execute(q)
+
+            response = requests.get(f'http://{_LOCAL_IP_}:5002/bat_combustion/{_UNIT_CODE_}/realtime')
+
+            q = f"""UPDATE {_DB_NAME_}.tb_bat_raw
+                    SET f_value=0,f_date_rec=NOW(),f_updated_at=NOW()
+                    WHERE f_address_no='{config.TAG_COPT_ISCALLING}' """
+            with engine.connect() as conn:
+                res = conn.execute(q)
+            
+            ret = response.json()
+            return ret
+        elif (now - copt_is_calling_timestamp) > pd.Timedelta('60sec'):
+            # Set back COPT_is_calling to 0 if last update > 60 sec ago.
+            q = f"""UPDATE {_DB_NAME_}.tb_bat_raw
+                    SET f_value=0,f_date_rec=NOW(),f_updated_at=NOW()
+                    WHERE f_address_no='{config.TAG_COPT_ISCALLING}' """
+            with engine.connect() as conn:
+                res = conn.execute(q)
     except Exception as e:
         logging(time.ctime(),'- Machine learning prediction error:', e)
         return str(e)
@@ -162,67 +230,43 @@ def bg_ml_runner():
     if 'RECOM_EXEC_INTERVAL' in parameters.index:
         RECOM_EXEC_INTERVAL = int(parameters['RECOM_EXEC_INTERVAL'])
     if 'DEBUG_MODE' in parameters.index:
-        DEBUG_MODE = False if (parameters['RECOM_EXEC_INTERVAL'].lower() in ['0','false',0]) else True
+        DEBUG_MODE = False if (parameters['DEBUG_MODE'].lower() in ['0','false',0]) else True
+    
+    print(f'DEBUG_MODE: {DEBUG_MODE}')
     
     if DEBUG_MODE:
         # Get latest recommendations time
         q = f"""SELECT MAX(ts) FROM {_DB_NAME_}.tb_combustion_model_generation"""
         df = pd.read_sql(q, con)
         try: LATEST_RECOMMENDATION_TIME = pd.to_datetime(df.values[0][0])
-        except Exception as e: logging(f"Error on line 130:", str(e)) 
+        except Exception as e: logging(f"Error on line 241:", str(e)) 
 
         # Return if latest recommendation is under RECOM_EXEC_INTERVAL minute
         now = pd.to_datetime(time.ctime())
         if (now - LATEST_RECOMMENDATION_TIME) < pd.Timedelta(f'{RECOM_EXEC_INTERVAL}min'):
-            return f"Waiting to next {now + pd.Timedelta(f'{RECOM_EXEC_INTERVAL}min') - LATEST_RECOMMENDATION_TIME} min"
+            return {'message':f"Waiting to next {LATEST_RECOMMENDATION_TIME + pd.Timedelta(f'{RECOM_EXEC_INTERVAL}min') - now} min"}
         
         # Calling ML Recommendations to the latest recommendation
-        # TODO: Set latest COPT call based on timestamp
-        q = f"""SELECT f_date_rec, f_value FROM {_DB_NAME_}.tb_bat_raw
-                WHERE f_address_no = "{config.TAG_COPT_ISCALLING}" """
-        copt_is_calling_timestamp, copt_is_calling = pd.read_sql(q, con).values[0]
-        if not copt_is_calling:
-            logging('Calling COPT ...')
-            q = f"""UPDATE {_DB_NAME_}.tb_bat_raw
-                    SET f_value=1,f_date_rec=NOW(),f_updated_at=NOW()
-                    WHERE f_address_no='{config.TAG_COPT_ISCALLING}' """
-            with engine.connect() as conn:
-                res = conn.execute(q)
-            val = bg_get_ml_recommendation()
+        val = bg_get_ml_recommendation()
 
-            q = f"""UPDATE {_DB_NAME_}.tb_bat_raw
-                    SET f_value=0,f_date_rec=NOW(),f_updated_at=NOW()
-                    WHERE f_address_no='{config.TAG_COPT_ISCALLING}' """
-            with engine.connect() as conn:
-                res = conn.execute(q)
-        elif (now - copt_is_calling_timestamp) > pd.Timedelta('60sec'):
-            # Set back COPT_is_calling to 0 if last update > 60 sec ago.
-            q = f"""UPDATE {_DB_NAME_}.tb_bat_raw
-                    SET f_value=0,f_date_rec=NOW(),f_updated_at=NOW()
-                    WHERE f_address_no='{config.TAG_COPT_ISCALLING}' """
-            with engine.connect() as conn:
-                res = conn.execute(q)
-    
     elif ENABLE_COPT:
         # Get latest recommendations time
         q = f"""SELECT MAX(ts) FROM {_DB_NAME_}.tb_combustion_model_generation"""
         df = pd.read_sql(q, con)
         try: LATEST_RECOMMENDATION_TIME = pd.to_datetime(df.values[0][0])
-        except Exception as e: logging(f"Error on line 209:", str(e)) 
+        except Exception as e: logging(f"Error on line 256:", str(e)) 
 
         now = pd.to_datetime(time.ctime())
         # TEMPORARY! 
         if (now - LATEST_RECOMMENDATION_TIME) < pd.Timedelta(f'{RECOM_EXEC_INTERVAL}min'):
-            return {'message:': str(LATEST_RECOMMENDATION_TIME)}
-        
-        # Calling ML Recommendations to the latest recommendation
-        ML = bg_get_ml_recommendation()
-        if type(ML) is not dict: 
-            print('Error on ML response. Columns "model_status" not found.')
-            return ML
-
-        if ML['model_status'] == 1:
-            # Limit recommendations to +- MAX_BIAS_PERCENTAGE %
+            # TODO: make a smooth transition recommendation
+            # Checking current O2 level
+            q = f"""SELECT raw.f_value FROM {_DB_NAME_}.cb_display disp
+                    LEFT JOIN {_DB_NAME_}.tb_bat_raw raw
+                    ON disp.f_tags = raw.f_address_no 
+                    WHERE disp.f_desc = "excess_o2" """
+            current_oxygen = pd.read_sql(q, con).values[0][0]
+            # Latest recommendation
             q = f"""SELECT gen.model_id, gen.ts, conf.f_tag_name, conf.f_description, 
                     gen.value, gen.bias_value, gen.enable_status, gen.value - gen.bias_value AS 'current_value' 
                     FROM {_DB_NAME_}.tb_tags_read_conf conf
@@ -231,33 +275,27 @@ def bg_ml_runner():
                     WHERE f_category = "Recommendation"
                     AND gen.ts = (SELECT MAX(ts) FROM {_DB_NAME_}.tb_combustion_model_generation tcmg)"""
             Recom = pd.read_sql(q, con)
+            set_point_oxygen = Recom[Recom['f_description'] == 'Excess Oxygen Sensor']['value']
+            if (abs(set_point_oxygen - current_oxygen) < config.OXYGEN_STEADY_STATE_LEVEL): 
+                return {'message': 'Oxygen is in steady state level.'}
             
-            o2_idx = None
-            # TODO: Limit recommendation to MAX_BIAS_PERCENTAGE %
-            for i in Recom.index:
-                mxv = MAX_BIAS_PERCENTAGE * abs(Recom.loc[i, 'current_value']) / 100
-                Recom.loc[i, 'bias_value'] = max(-mxv, Recom.loc[i, 'bias_value'])
-                Recom.loc[i, 'bias_value'] = min(mxv, Recom.loc[i, 'bias_value'])
-                if 'Oxygen' in Recom.loc[i, 'f_description']: o2_idx = i
-            Recom['value'] = Recom['current_value'] + Recom['bias_value']
-            
-            # Calculate O2 Set Point based on GrossMW from DCS
-            q = f"""SELECT f_value FROM {_DB_NAME_}.cb_display disp
-                    LEFT JOIN {_DB_NAME_}.tb_bat_raw raw
-                    on disp.f_tags = raw.f_address_no 
-                    WHERE f_desc = "generator_gross_load" """
-            dcs_mw = pd.read_sql(q, con).values[0][0]
-            dcs_o2 = DCS_O2.predict(dcs_mw)
+            # Write recommendation to OPC
+            bg_write_recommendation_to_opc(MAX_BIAS_PERCENTAGE)
+            return {'message':f"Waiting to next {LATEST_RECOMMENDATION_TIME + pd.Timedelta(f'{RECOM_EXEC_INTERVAL}min') - now} min"}
+        
+        else:
+            # Calling ML Recommendations to the latest recommendation
+            ML = bg_get_ml_recommendation()
 
-            opc_write = Recom[['f_tag_name','ts','value']]
-            opc_write.columns = ['tag_name','ts','value']
-            
-            if o2_idx is not None:
-                opc_write.loc[o2_idx, 'value'] = opc_write.loc[o2_idx, 'value'] - dcs_o2
-            
-            opc_write.to_sql('tb_opc_write', con, if_exists='append', index=False)
-            opc_write.to_sql('tb_opc_write_history', con, if_exists='append', index=False)
-            return 'Done!'
+            if type(ML) is not dict: 
+                return {'message':'Error on ML response. Columns "model_status" not found.'}
+
+            if ML['model_status'] == 1:
+                try:
+                    bg_write_recommendation_to_opc(MAX_BIAS_PERCENTAGE)
+                except Exception as e:
+                    return {'message': str(e)}
+                return {'message':'Done!'}
 
 if _LOCAL_MODE_:
     k = bg_ml_runner()

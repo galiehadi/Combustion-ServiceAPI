@@ -1,20 +1,20 @@
 import pandas as pd
 import numpy as np
-import time, db_config
+import time, config
 from urllib.parse import quote_plus as urlparse
 from pprint import pprint
 
 import sqlalchemy
 
-_USER_ = db_config._USER_
-_PASS_ = urlparse(db_config._PASS_)
-_IP_ = db_config._IP_
-_DB_NAME_ = db_config._DB_NAME_
+_USER_ = config._USER_
+_PASS_ = urlparse(config._PASS_)
+_IP_ = config._IP_
+_DB_NAME_ = config._DB_NAME_
 
 con = f"mysql+mysqlconnector://{_USER_}:{_PASS_}@{_IP_}/{_DB_NAME_}"
 
 def get_status():
-    keys = ['WatchdogStatus',db_config.SAFEGUARD_TAG,'TAG:ENABLE_COPT']
+    keys = ['WatchdogStatus',config.SAFEGUARD_TAG,'TAG:ENABLE_COPT']
     q = f"""SELECT f_tag_name FROM {_DB_NAME_}.tb_tags_read_conf ttrc 
             WHERE f_description = "Tag Enable COPT" """
     try: keys[2] = pd.read_sql(q, con).values[0][0]
