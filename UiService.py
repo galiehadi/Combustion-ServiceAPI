@@ -14,7 +14,7 @@ _DB_NAME_ = config._DB_NAME_
 con = f"mysql+mysqlconnector://{_USER_}:{_PASS_}@{_IP_}/{_DB_NAME_}"
 
 def get_status():
-    keys = ['WatchdogStatus',config.SAFEGUARD_TAG,'TAG:ENABLE_COPT']
+    keys = [config.WATCHDOG_TAG,config.SAFEGUARD_TAG,'TAG:ENABLE_COPT']
     q = f"""SELECT f_tag_name FROM {_DB_NAME_}.tb_tags_read_conf ttrc 
             WHERE f_description = "Tag Enable COPT" """
     try: keys[2] = pd.read_sql(q, con).values[0][0]
