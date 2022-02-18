@@ -77,7 +77,9 @@ def get_alarm_history(page, limit):
         page = max([int(page),0]); limit = int(limit)
         l1 = (page) * limit
         l2 = (page+1) * limit
-    q = f"""SELECT * FROM {_DB_NAME_}.tb_combustion_alarm_history
+    q = f"""SELECT f_int_id AS alarmId, f_timestamp AS date, f_desc AS 'desc',
+            f_set_value AS setValue, f_actual_value AS actualValue
+            FROM {_DB_NAME_}.tb_combustion_alarm_history
             ORDER BY f_timestamp DESC
             LIMIT {l1},{l2}"""
     df = pd.read_sql(q, con)
