@@ -80,9 +80,6 @@ def get_alarm_history(page, limit):
     q = f"""SELECT * FROM {_DB_NAME_}.tb_combustion_alarm_history
             ORDER BY f_timestamp DESC
             LIMIT {l1},{l2}"""
-    q = f"""SELECT ts AS f_timestamp, message AS f_desc, status AS f_set_value FROM {_DB_NAME_}.tb_combustion_model_message tcmm
-            ORDER BY ts DESC
-            LIMIT {l1},{l2}"""
     df = pd.read_sql(q, con)
     df_dict = df.astype(str).to_dict('records')
     return df_dict
