@@ -36,6 +36,7 @@ def logging(text):
 def bg_safeguard_check():
     t0 = time.time()
     q = f"""SELECT
+                NOW() AS timestamp,
                 rule.f_tag_sensor,
                 conf.f_description,
                 rule.f_bracket_open,
@@ -53,72 +54,104 @@ def bg_safeguard_check():
                 hdr.f_rule_descr = "SAFEGUARD"
             ORDER BY
                 rule.f_sequence"""
-    df = pd.read_sql(q, con)
-    
-    sg = df[['f_bracket_open','f_value','f_bracket_close']]
+    sg = pd.read_sql(q, con)
+    ts = sg['timestamp'].max()
 
     Safeguard_status = True
     Safeguard_text = ''
+    Alarms = []
     for i in sg.index:
-        bracketOpen, value, bracketClose = sg.iloc[i]
+        _, tagname, description, bracketOpen, value, bracketClose = sg.iloc[i]
         Safeguard_text += f"{bracketOpen}{value}{bracketClose} "
+
+        bracketClose_ = bracketClose.replace('AND','').replace('OR','')
+        individualRule = f"{bracketOpen}{value}{bracketClose_} ".lower()
+        individualAlarm = {
+            'f_timestamp': ts,
+            'f_desc': 'Safeguard',
+            'f_set_value': f"{bracketOpen}{description}{bracketClose_}",
+            'f_actual_value':str(value),
+            'f_rule_header': 20
+        }
+        try: 
+            if not eval(individualRule): Alarms.append(individualAlarm)
+        except:
+            Alarms.append(individualAlarm)
 
     Safeguard_text = Safeguard_text.lower()
     Safeguard_status = eval(Safeguard_text)
 
     ret = {
         'Safeguard Status': Safeguard_status,
-        'Execution time': str(round(time.time() - t0,3)) + ' sec'
+        'Execution time': str(round(time.time() - t0,3)) + ' sec',
+        'Individual Alarm': Alarms
     }
     return ret
 
+# TODO: Reconstruct safeguard updates
 def bg_safeguard_update():
-    ret = bg_safeguard_check()
-    Safeguard_status = ret['Safeguard Status']
+    S = bg_safeguard_check()
+    safeguard_status = S['Safeguard Status']
 
-    q = f"""UPDATE {_DB_NAME_}.tb_bat_raw SET f_date_rec=NOW(), f_value={1 if Safeguard_status else 0}, f_updated_at=NOW()
+    O2_tag, GrossMW_tag, COPTenable_name = ['excess_o2', 'generator_gross_load', config.DESC_ENABLE_COPT]
+
+    # Get current condition
+    q = f"""SELECT NOW() AS f_date_rec, f_description as name, raw.f_value FROM {_DB_NAME_}.tb_tags_read_conf conf
+            LEFT JOIN {_DB_NAME_}.tb_bat_raw raw
+            ON conf.f_tag_name = raw.f_address_no 
+            WHERE conf.f_description = "{config.DESC_ENABLE_COPT}" 
+            UNION 
+            SELECT NOW() AS f_date_rec, f_address_no AS name, f_value FROM {_DB_NAME_}.tb_bat_raw raw
+            WHERE f_address_no = "{config.SAFEGUARD_TAG}"
+            UNION
+            SELECT NOW() AS f_date_rec, disp.f_desc AS name, raw.f_value FROM {_DB_NAME_}.cb_display disp
+            LEFT JOIN {_DB_NAME_}.tb_bat_raw raw
+            ON disp.f_tags = raw.f_address_no 
+            WHERE disp.f_desc IN ("{O2_tag}", "{GrossMW_tag}") """
+    df = pd.read_sql(q, con)
+    ts = df['f_date_rec'].max()
+    df = df.set_index('name')['f_value']
+    safeguard_current = bool(df[config.SAFEGUARD_TAG])
+    combustion_enable = bool(df[config.DESC_ENABLE_COPT])
+    mw_current = df[GrossMW_tag]
+    o2_current = df[O2_tag]
+
+    # Always update safeguard status
+    q = f"""UPDATE {_DB_NAME_}.tb_bat_raw SET f_date_rec=NOW(), f_value={1 if safeguard_status else 0}, f_updated_at=NOW()
             WHERE f_address_no = "{config.SAFEGUARD_TAG}" """
     with engine.connect() as conn:
         res = conn.execute(q)
 
-    # Update Tag Enable COPT to False if 
-    if not ret['Safeguard Status']:
-        O2_tag, GrossMW_tag, COPTenable_name = ['excess_o2', 'generator_gross_load', config.DESC_ENABLE_COPT]
+    # If combustion is enabled and safeguard is down, disable the recommendations, revert back to its original condition
+    # and append alarm history
+    if combustion_enable and not safeguard_status:
+        # Disable COPT
         q = f"""UPDATE {_DB_NAME_}.tb_bat_raw SET f_date_rec = NOW(), f_value = 0, f_updated_at = NOW()
                 WHERE f_address_no = (SELECT conf.f_tag_name FROM {_DB_NAME_}.tb_tags_read_conf conf
                                     WHERE f_description = "{config.DESC_ENABLE_COPT}")"""
-                                    
-        q2= f"""SELECT NOW() AS f_date_rec, disp.f_desc , raw.f_value FROM {_DB_NAME_}.cb_display disp
-                LEFT JOIN {_DB_NAME_}.tb_bat_raw raw
-                ON disp.f_tags = raw.f_address_no 
-                WHERE disp.f_desc IN ("{O2_tag}", "{GrossMW_tag}")
-                UNION
-                SELECT NOW() AS f_date_rec, conf.f_description AS f_desc, raw.f_value FROM {_DB_NAME_}.tb_tags_read_conf conf
-                LEFT JOIN  {_DB_NAME_}.tb_bat_raw raw
-                ON raw.f_address_no = conf.f_tag_name 
-                WHERE conf.f_description = "{COPTenable_name}" """
-        df = pd.read_sql(q2,con).pivot_table(index='f_date_rec', columns='f_desc', values='f_value')
-        ts = df.index.max()
-        o2_current = df[O2_tag].max()
-        mw_current = df[GrossMW_tag].max()
+        with engine.connect() as conn:
+            res = conn.execute(q)
+
         copt_enable = df[COPTenable_name].max()
         o2_bias = o2_current - DCS_O2.predict(mw_current)
 
-        q3= f"""SELECT f_tag_name FROM {_DB_NAME_}.tb_tags_read_conf conf
+        q = f"""SELECT f_tag_name FROM {_DB_NAME_}.tb_tags_read_conf conf
                 WHERE f_description = "Excess Oxygen Sensor" """
-        o2_recom_tag = pd.read_sql(q3, con).values[0][0]
+        o2_recom_tag = pd.read_sql(q, con).values[0][0]
+
+        logging('Some of safeguards are violated. Turning off COPT ...')
         
-        if copt_enable:
-            logging('Some of safeguards are violated. Turning off COPT ...')
-            with engine.connect() as conn:
-                res = conn.execute(q)
-            opc_write = [[o2_recom_tag, ts, o2_bias]]
-            opc_write = pd.DataFrame(opc_write, columns=['tag_name','ts','value'])
-            
-            opc_write.to_sql('tb_opc_write', con, if_exists='append', index=False)
-            opc_write.to_sql('tb_opc_write_history', con, if_exists='append', index=False)
-            
-    return ret
+        opc_write = [[o2_recom_tag, ts, o2_bias]]
+        opc_write = pd.DataFrame(opc_write, columns=['tag_name','ts','value'])
+        
+        opc_write.to_sql('tb_opc_write', con, if_exists='append', index=False)
+        opc_write.to_sql('tb_opc_write_history', con, if_exists='append', index=False)
+
+        # Append alarm history
+        Alarms = S['Individual Alarm']
+        AlarmDF = pd.DataFrame(Alarms)
+        AlarmDF.to_sql('tb_combustion_alarm_history', con, if_exists='append', index=False)
+
 
 def bg_get_recom_exec_interval():
     q = f"""SELECT f_default_value FROM {_DB_NAME_}.tb_combustion_parameters tcp 
