@@ -86,6 +86,18 @@ def get_alarm_history(page, limit):
     df_dict = df.astype(str).to_dict('records')
     return df_dict
 
+def get_specific_alarm_history(alarmID):
+    q = f"""SELECT f_int_id AS alarmId, f_timestamp AS `date`, 
+            f_set_value AS setValue, f_actual_value AS actualValue, 
+            f_desc AS `desc` FROM {_DB_NAME_}.tb_combustion_alarm_history tcah 
+            WHERE f_int_id = {alarmID} """
+    df = pd.read_sql(q, con)
+    df_dict = df.astype(str).to_dict('records')
+    if len(df_dict) > 0:
+        return df_dict[0]
+    else:
+        return {}
+
 def get_rules_detailed(rule_id):
     q = f"""SELECT f_rule_dtl_id AS ruleDetailId, f_rule_hdr_id AS ruleHeaderId, f_sequence AS sequence, f_bracket_open AS bracketOpen, f_bracket_close AS bracketClose, f_tag_sensor AS tagSensor 
             FROM {_DB_NAME_}.tb_combustion_rules_dtl
@@ -211,3 +223,6 @@ def post_parameter(payload):
         res = conn.execute(q)
 
     return {'Status':'Success'}
+
+def post_alarm(payload):
+    return {'Status': 'Failed'}
