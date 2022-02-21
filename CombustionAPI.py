@@ -51,6 +51,42 @@ def alarm_history():
         data['message'] = str(E)
     return data
 
+@app.route('/service/copt/bat/combustion/detail/alarm-history/<alarmID>')
+def alarm_history_id(alarmID):
+    page = request.args.get('page')
+    limit = request.args.get('limit')
+
+    data = {
+        "message": "Failed",
+        "total": 100,
+        "limit": limit,
+        "page": page
+    }
+    
+    try:
+        data['object'] = get_specific_alarm_history(alarmID)
+        data['message'] = 'Success'
+    except Exception as E:
+        data['object'] = []
+        data['message'] = str(E)
+    return data
+
+@app.route('/service/copt/bat/combustion/update/alarm-history/<alarmID>', methods=['POST'])
+def alarm_history_id(alarmID):
+    payload = dict(request.get_json())
+
+    objects = post_alarm(payload)
+
+    data = {
+        "message": "Success" if (objects['Status'] == "Success") else "Failed",
+        "total": 1,
+        "limit": 1,
+        "page": 0,
+        "object": objects
+    }
+
+    return data
+
 @app.route('/service/copt/bat/combustion/rule/<ruleID>')
 def rule(ruleID):
     data = {
