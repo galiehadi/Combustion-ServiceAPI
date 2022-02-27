@@ -144,8 +144,8 @@ def bg_safeguard_update():
         opc_write = [[o2_recom_tag, ts, o2_bias]]
         opc_write = pd.DataFrame(opc_write, columns=['tag_name','ts','value'])
         
-        opc_write.to_sql('tb_opc_write', con, if_exists='append', index=False)
-        opc_write.to_sql('tb_opc_write_history', con, if_exists='append', index=False)
+        opc_write.to_sql('tb_opc_write_copt', con, if_exists='append', index=False)
+        opc_write.to_sql('tb_opc_write_history_copt', con, if_exists='append', index=False)
 
         # Append alarm history
         Alarms = S['Individual Alarm']
@@ -194,8 +194,8 @@ def bg_write_recommendation_to_opc(MAX_BIAS_PERCENTAGE):
     if o2_idx is not None:
         opc_write.loc[o2_idx, 'value'] = opc_write.loc[o2_idx, 'value'] - dcs_o2
     
-    opc_write.to_sql('tb_opc_write', con, if_exists='append', index=False)
-    opc_write.to_sql('tb_opc_write_history', con, if_exists='append', index=False)
+    opc_write.to_sql('tb_opc_write_copt', con, if_exists='append', index=False)
+    opc_write.to_sql('tb_opc_write_history_copt', con, if_exists='append', index=False)
     logging(f'Write to OPC: {opc_write}')
     return 'Done!'
 
