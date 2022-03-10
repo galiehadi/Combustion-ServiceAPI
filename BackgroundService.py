@@ -1,7 +1,7 @@
 from operator import index
 import pandas as pd
 import numpy as np
-import time, sqlalchemy, requests, config
+import time, sqlalchemy, requests, config, re
 from urllib.parse import quote_plus as urlparse
 from pprint import pprint
 from regional_regressor import RegionalLinearReg
@@ -22,8 +22,9 @@ _LOCAL_MODE_ = False
 
 # Default values
 DEBUG_MODE = True
-dcs_x = [0, 150, 255, 300, 330]
-dcs_y = [8, 6.0, 4.5, 4.0, 4.0]
+dcs_x = [ 0, 38.291, 55.29, 72.67, 75.83, 100] # Dalam persen
+dcs_x = [ 0, 126.3603, 182.457, 239.811, 250.239, 330]
+dcs_y = [12,      8.0,    4.75,    3.50,    3.50, 3.5]
 DCS_O2 = RegionalLinearReg(dcs_x, dcs_y)
 
 con = f"mysql+mysqlconnector://{_USER_}:{_PASS_}@{_IP_}/{_DB_NAME_}"
@@ -62,6 +63,7 @@ def bg_safeguard_check():
     Alarms = []
     for i in sg.index:
         _, tagname, description, bracketOpen, value, bracketClose = sg.iloc[i]
+        bracketClose = bracketClose.replace('==','=').replace("=","==")
         Safeguard_text += f"{bracketOpen}{value}{bracketClose} "
 
         bracketClose_ = bracketClose.replace('AND','').replace('OR','')
@@ -151,6 +153,7 @@ def bg_safeguard_update():
         Alarms = S['Individual Alarm']
         AlarmDF = pd.DataFrame(Alarms)
         AlarmDF.to_sql('tb_combustion_alarm_history', con, if_exists='append', index=False)
+    return S
 
 
 def bg_get_recom_exec_interval():
@@ -161,6 +164,33 @@ def bg_get_recom_exec_interval():
     return recom_exec_interval
 
 def bg_write_recommendation_to_opc(MAX_BIAS_PERCENTAGE):
+    # Enable Status
+    q = f"""SELECT conf.description, raw.f_value FROM db_bat_tja1.tb_bat_raw raw
+            LEFT JOIN db_bat_tja1.tb_combustion_conf_tags conf
+            ON raw.f_address_no = conf.tag_name
+            WHERE conf.category LIKE "%Enable%" 
+            """
+    Enable_status_df = pd.read_sql(q, con).set_index('description')['f_value']
+
+    # Enable tags
+    q = f"""SELECT hdr.f_rule_descr, dtl.f_tag_sensor FROM db_bat_tja1.tb_combustion_rules_hdr hdr
+            LEFT JOIN db_bat_tja1.tb_combustion_rules_dtl dtl
+            ON dtl.f_rule_hdr_id = hdr.f_rule_hdr_id
+            WHERE hdr.f_is_active = 1
+            AND dtl.f_is_active = 1"""
+    taglists = pd.read_sql(q, con)
+
+    Enable_status = {
+        config.DESC_ENABLE_COPT_BT: {
+            'status': Enable_status_df[config.DESC_ENABLE_COPT],
+            'tag_lists': taglists[taglists['f_rule_descr'] == config.DESC_ENABLE_COPT_BT]['f_tag_sensor'].to_list(),
+        },
+        config.DESC_ENABLE_COPT_SEC: {
+            'status': Enable_status_df[config.DESC_ENABLE_COPT],
+            'tag_lists': taglists[taglists['f_rule_descr'] == config.DESC_ENABLE_COPT_SEC]['f_tag_sensor'].to_list(),
+        },
+    }
+
     # Limit recommendations to +- MAX_BIAS_PERCENTAGE %
     q = f"""SELECT gen.model_id, gen.ts, conf.f_tag_name, conf.f_description, 
             gen.value, gen.bias_value, gen.enable_status, gen.value - gen.bias_value AS 'current_value' 
@@ -170,7 +200,7 @@ def bg_write_recommendation_to_opc(MAX_BIAS_PERCENTAGE):
             WHERE f_category = "Recommendation"
             AND gen.ts = (SELECT MAX(ts) FROM {_DB_NAME_}.tb_combustion_model_generation tcmg)"""
     Recom = pd.read_sql(q, con)
-    
+
     o2_idx = None
     # Limit recommendation to MAX_BIAS_PERCENTAGE %
     for i in Recom.index:
@@ -179,7 +209,7 @@ def bg_write_recommendation_to_opc(MAX_BIAS_PERCENTAGE):
         Recom.loc[i, 'bias_value'] = min(mxv, Recom.loc[i, 'bias_value'])
         if 'Oxygen' in Recom.loc[i, 'f_description']: o2_idx = i
     Recom['value'] = Recom['current_value'] + Recom['bias_value']
-    
+
     # Calculate O2 Set Point based on GrossMW from DCS
     q = f"""SELECT f_value FROM {_DB_NAME_}.cb_display disp
             LEFT JOIN {_DB_NAME_}.tb_bat_raw raw
@@ -190,14 +220,33 @@ def bg_write_recommendation_to_opc(MAX_BIAS_PERCENTAGE):
 
     opc_write = Recom[['f_tag_name','ts','value']]
     opc_write.columns = ['tag_name','ts','value']
-    
+    opc_write['ts'] = pd.to_datetime('now')
+
     if o2_idx is not None:
         opc_write.loc[o2_idx, 'value'] = opc_write.loc[o2_idx, 'value'] - dcs_o2
+
+    # Remove tags that disabled partially
+    for C in Enable_status.keys():
+        if not bool(Enable_status[C]['status']):
+            tags = Enable_status[C]['tag_lists']
+            opc_write = opc_write.drop(index = opc_write[opc_write['tag_name'].isin(tags)].index)
     
     opc_write.to_sql('tb_opc_write_copt', con, if_exists='append', index=False)
     opc_write.to_sql('tb_opc_write_history_copt', con, if_exists='append', index=False)
     logging(f'Write to OPC: {opc_write}')
     return 'Done!'
+
+def bg_get_ml_model_status():
+    q = f"""SELECT message FROM {_DB_NAME_}.tb_combustion_model_message 
+        WHERE ts = (SELECT MAX(ts) FROM {_DB_NAME_}.tb_combustion_model_message)
+        AND ts > (NOW() - INTERVAL 1 HOUR) """
+    message = pd.read_sql(q, con)
+    if len(message) > 0:
+        message = message.values[0][0]
+        code = message.split(':')[0]
+        code = int(re.findall('[0-9]+', code)[0])
+        return code
+    return 'Failed'
 
 def bg_get_ml_recommendation():
     try:
@@ -216,7 +265,7 @@ def bg_get_ml_recommendation():
             with engine.connect() as conn:
                 res = conn.execute(q)
 
-            response = requests.get(f'http://{_LOCAL_IP_}:5002/bat_combustion/{_UNIT_CODE_}/realtime')
+            response = requests.get(f'http://{_LOCAL_IP_}:5000/bat_combustion/{_UNIT_CODE_}/realtime')
 
             q = f"""UPDATE {_DB_NAME_}.tb_bat_raw
                     SET f_value=0,f_date_rec=NOW(),f_updated_at=NOW()
@@ -234,7 +283,7 @@ def bg_get_ml_recommendation():
             with engine.connect() as conn:
                 res = conn.execute(q)
     except Exception as e:
-        logging(time.ctime(),'- Machine learning prediction error:', e)
+        logging(f'Machine learning prediction error: {e}')
         return str(e)
 
 def bg_ml_runner():
@@ -246,12 +295,15 @@ def bg_ml_runner():
     t0 = time.time()
 
     # Get Enable status
-    q = f"""SELECT raw.f_value FROM {_DB_NAME_}.tb_tags_read_conf conf
+    q = f"""SELECT conf.f_description, raw.f_value FROM {_DB_NAME_}.tb_tags_read_conf conf
             LEFT JOIN {_DB_NAME_}.tb_bat_raw raw
             ON conf.f_tag_name = raw.f_address_no 
-            WHERE conf.f_description = "{config.DESC_ENABLE_COPT}" """
-    df = pd.read_sql(q, con)
-    ENABLE_COPT = df.values[0][0]
+            WHERE conf.f_description IN ("{config.DESC_ENABLE_COPT}",
+            "{config.DESC_ENABLE_COPT_BT}","{config.DESC_ENABLE_COPT_SEC}") """
+    df = pd.read_sql(q, con).set_index('f_description')['f_value']
+    ENABLE_COPT = df[config.DESC_ENABLE_COPT]
+    ENABLE_COPT_BT = df[config.DESC_ENABLE_COPT_BT]
+    ENABLE_COPT_SEC = df[config.DESC_ENABLE_COPT_SEC]
 
     # Get parameters
     q = f"""SELECT f_label, f_default_value FROM {_DB_NAME_}.tb_combustion_parameters tcp 
@@ -263,9 +315,9 @@ def bg_ml_runner():
     if 'RECOM_EXEC_INTERVAL' in parameters.index:
         RECOM_EXEC_INTERVAL = int(parameters['RECOM_EXEC_INTERVAL'])
     if 'DEBUG_MODE' in parameters.index:
-        DEBUG_MODE = False if (parameters['DEBUG_MODE'].lower() in ['0','false',0]) else True
+        DEBUG_MODE = False if (str(int(parameters['DEBUG_MODE'])).lower() in ['0','false',0]) else True
     
-    print(f'DEBUG_MODE: {DEBUG_MODE}')
+    logging(f'DEBUG_MODE: {DEBUG_MODE}')
     
     if DEBUG_MODE:
         # Get latest recommendations time
@@ -281,13 +333,14 @@ def bg_ml_runner():
         
         # Calling ML Recommendations to the latest recommendation
         val = bg_get_ml_recommendation()
+        return {'message': f"Value: {val}"}
 
     elif ENABLE_COPT:
         # Get latest recommendations time
         q = f"""SELECT MAX(ts) FROM {_DB_NAME_}.tb_combustion_model_generation"""
         df = pd.read_sql(q, con)
         try: LATEST_RECOMMENDATION_TIME = pd.to_datetime(df.values[0][0])
-        except Exception as e: logging(f"Error on line 256:", str(e)) 
+        except Exception as e: logging(f"Error on line 344: {e}") 
 
         now = pd.to_datetime(time.ctime())
         # TEMPORARY! 
@@ -321,7 +374,11 @@ def bg_ml_runner():
             ML = bg_get_ml_recommendation()
 
             if type(ML) is not dict: 
-                return {'message':'Error on ML response. Columns "model_status" not found.'}
+                if 'model_status' not in ML.keys():
+                    try:
+                        ML['model_status'] = int(bg_get_ml_model_status())
+                    except:
+                        return {'message':'Error on ML response. Columns "model_status" not found.'}
 
             if ML['model_status'] == 1:
                 try:
