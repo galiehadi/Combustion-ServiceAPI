@@ -1,6 +1,6 @@
 from distutils.log import debug
 from flask import Flask, request, jsonify
-from flask_cors import CORS
+from flask_cors import CORS, cross_origin
 from itsdangerous import json
 from UiService import *
 from BackgroundService import *
@@ -14,6 +14,7 @@ debug_mode = False
 
 # ================================== Service UI ================================== #
 @app.route('/service/copt/bat/combustion/indicator')
+@cross_origin(supports_credentials=True)
 def indicator():
     data = {
         'message': 'Failed',

@@ -124,6 +124,12 @@ def bg_safeguard_update():
     with engine.connect() as conn:
         res = conn.execute(q)
 
+    # Adding write safeguard status on tb_comb_constraint
+    q = f"""UPDATE {_DB_NAME_}.tb_comb_constraint SET f_last_update = NOW(), f_value={1 if safeguard_status else 0}
+            WHERE f_constraint = "SAFEGUARD" """
+    with engine.connect() as conn:
+        res = conn.execute(q)
+
     # If combustion is enabled and safeguard is down, disable the recommendations, revert back to its original condition
     # and append alarm history
     if combustion_enable and not safeguard_status:
@@ -133,12 +139,17 @@ def bg_safeguard_update():
                                     WHERE f_description = "{config.DESC_ENABLE_COPT}")"""
         with engine.connect() as conn:
             res = conn.execute(q)
+        # Also update on tb_comb_constraint
+        q = f"""UPDATE {_DB_NAME_}.tb_comb_constraint SET f_last_update = NOW(), f_value=0
+                WHERE f_constraint = "COMB_ENABLE" """
+        with engine.connect() as conn:
+            res = conn.execute(q)
 
         copt_enable = df[COPTenable_name].max()
         o2_bias = o2_current - DCS_O2.predict(mw_current)
 
         q = f"""SELECT f_tag_name FROM {_DB_NAME_}.tb_tags_read_conf conf
-                WHERE f_description = "Excess Oxygen Sensor" """
+                WHERE f_description = "Excess O2" """
         o2_recom_tag = pd.read_sql(q, con).values[0][0]
 
         logging('Some of safeguards are violated. Turning off COPT ...')
@@ -165,16 +176,16 @@ def bg_get_recom_exec_interval():
 
 def bg_write_recommendation_to_opc(MAX_BIAS_PERCENTAGE):
     # Enable Status
-    q = f"""SELECT conf.description, raw.f_value FROM db_bat_tja1.tb_bat_raw raw
-            LEFT JOIN db_bat_tja1.tb_combustion_conf_tags conf
+    q = f"""SELECT conf.description, raw.f_value FROM {_DB_NAME_}.tb_bat_raw raw
+            LEFT JOIN {_DB_NAME_}.tb_combustion_conf_tags conf
             ON raw.f_address_no = conf.tag_name
             WHERE conf.category LIKE "%Enable%" 
             """
     Enable_status_df = pd.read_sql(q, con).set_index('description')['f_value']
 
     # Enable tags
-    q = f"""SELECT hdr.f_rule_descr, dtl.f_tag_sensor FROM db_bat_tja1.tb_combustion_rules_hdr hdr
-            LEFT JOIN db_bat_tja1.tb_combustion_rules_dtl dtl
+    q = f"""SELECT hdr.f_rule_descr, dtl.f_tag_sensor FROM {_DB_NAME_}.tb_combustion_rules_hdr hdr
+            LEFT JOIN {_DB_NAME_}.tb_combustion_rules_dtl dtl
             ON dtl.f_rule_hdr_id = hdr.f_rule_hdr_id
             WHERE hdr.f_is_active = 1
             AND dtl.f_is_active = 1"""
