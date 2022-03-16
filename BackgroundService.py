@@ -121,32 +121,20 @@ def bg_safeguard_update():
     # Always update safeguard status
     q = f"""UPDATE {_DB_NAME_}.tb_bat_raw SET f_date_rec=NOW(), f_value={1 if safeguard_status else 0}, f_updated_at=NOW()
             WHERE f_address_no = "{config.SAFEGUARD_TAG}" """
-    with engine.connect() as conn:
-        res = conn.execute(q)
-
-    # Adding write safeguard status on tb_comb_constraint
-    q = f"""UPDATE {_DB_NAME_}.tb_comb_constraint SET f_last_update = NOW(), f_value={1 if safeguard_status else 0}
-            WHERE f_constraint = "SAFEGUARD" """
+    q = f"""REPLACE INTO {_DB_NAME_}.tb_bat_raw (f_address_no, f_date_rec, f_value, f_updated_at)
+            VALUES ('{config.SAFEGUARD_TAG}', NOW(), {1 if safeguard_status else 0}, NOW());"""
     with engine.connect() as conn:
         res = conn.execute(q)
 
     # If combustion is enabled and safeguard is down, disable the recommendations, revert back to its original condition
     # and append alarm history
     if combustion_enable and not safeguard_status:
-        # Disable COPT
-        q = f"""UPDATE {_DB_NAME_}.tb_bat_raw SET f_date_rec = NOW(), f_value = 0, f_updated_at = NOW()
-                WHERE f_address_no = (SELECT conf.f_tag_name FROM {_DB_NAME_}.tb_tags_read_conf conf
-                                    WHERE f_description = "{config.DESC_ENABLE_COPT}")"""
-        with engine.connect() as conn:
-            res = conn.execute(q)
-        # Also update on tb_comb_constraint
-        q = f"""UPDATE {_DB_NAME_}.tb_comb_constraint SET f_last_update = NOW(), f_value=0
-                WHERE f_constraint = "COMB_ENABLE" """
-        with engine.connect() as conn:
-            res = conn.execute(q)
-
-        copt_enable = df[COPTenable_name].max()
-        o2_bias = o2_current - DCS_O2.predict(mw_current)
+        # # Disable COPT (not turning off COPT, just send alarm to OPC)
+        # q = f"""UPDATE {_DB_NAME_}.tb_bat_raw SET f_date_rec = NOW(), f_value = 0, f_updated_at = NOW()
+        #         WHERE f_address_no = (SELECT conf.f_tag_name FROM {_DB_NAME_}.tb_tags_read_conf conf
+        #                             WHERE f_description = "{config.DESC_ENABLE_COPT}")"""
+        # with engine.connect() as conn:
+        #     res = conn.execute(q)
 
         q = f"""SELECT f_tag_name FROM {_DB_NAME_}.tb_tags_read_conf conf
                 WHERE f_description = "Excess O2" """
@@ -154,6 +142,10 @@ def bg_safeguard_update():
 
         logging('Some of safeguards are violated. Turning off COPT ...')
         
+        # Revert all changes
+        copt_enable = df[COPTenable_name].max()
+        o2_bias = o2_current - DCS_O2.predict(mw_current)
+
         opc_write = [[o2_recom_tag, ts, o2_bias]]
         opc_write = pd.DataFrame(opc_write, columns=['tag_name','ts','value'])
         
@@ -164,6 +156,13 @@ def bg_safeguard_update():
         Alarms = S['Individual Alarm']
         AlarmDF = pd.DataFrame(Alarms)
         AlarmDF.to_sql('tb_combustion_alarm_history', con, if_exists='append', index=False)
+
+        # Write alarm 102 to DCS
+        q = f"""INSERT IGNORE INTO {_DB_NAME_}.tb_opc_write_copt
+                SELECT f_tag_name AS tag_name, NOW() AS ts, 102 AS value FROM {_DB_NAME_}.tb_tags_write_conf ttwc 
+                WHERE f_description = "{config.DESC_ALARM}" """
+        with engine.connect() as conn:
+            res = conn.execute(q)
     return S
 
 
@@ -184,23 +183,19 @@ def bg_write_recommendation_to_opc(MAX_BIAS_PERCENTAGE):
     Enable_status_df = pd.read_sql(q, con).set_index('description')['f_value']
 
     # Enable tags
-    q = f"""SELECT hdr.f_rule_descr, dtl.f_tag_sensor FROM {_DB_NAME_}.tb_combustion_rules_hdr hdr
-            LEFT JOIN {_DB_NAME_}.tb_combustion_rules_dtl dtl
-            ON dtl.f_rule_hdr_id = hdr.f_rule_hdr_id
-            WHERE hdr.f_is_active = 1
-            AND dtl.f_is_active = 1"""
-    taglists = pd.read_sql(q, con)
+    q = f"""SELECT f_category, f_description, f_tag_name FROM db_bat_tja1.tb_tags_write_conf
+            WHERE f_tag_use = "COPT" """
+    Write_tags = pd.read_sql(q, con)
+    Write_tags
 
-    Enable_status = {
-        config.DESC_ENABLE_COPT_BT: {
-            'status': Enable_status_df[config.DESC_ENABLE_COPT],
-            'tag_lists': taglists[taglists['f_rule_descr'] == config.DESC_ENABLE_COPT_BT]['f_tag_sensor'].to_list(),
-        },
-        config.DESC_ENABLE_COPT_SEC: {
-            'status': Enable_status_df[config.DESC_ENABLE_COPT],
-            'tag_lists': taglists[taglists['f_rule_descr'] == config.DESC_ENABLE_COPT_SEC]['f_tag_sensor'].to_list(),
-        },
-    }
+    Enable_status = {}
+    for c in [config.DESC_ENABLE_COPT_BT, config.DESC_ENABLE_COPT_SEC, config.DESC_ENABLE_COPT_MOT]:
+        status = int(Enable_status_df[c]) if c in Enable_status_df.index else 0
+        tags = Write_tags[Write_tags['f_category'] == c]['f_tag_name'].values.tolist() if c in np.unique(Write_tags['f_category']) else []
+        Enable_status[c] = {
+            'status': status,
+            'tag_lists': tags
+        }
 
     # Limit recommendations to +- MAX_BIAS_PERCENTAGE %
     q = f"""SELECT gen.model_id, gen.ts, conf.f_tag_name, conf.f_description, 
@@ -219,6 +214,7 @@ def bg_write_recommendation_to_opc(MAX_BIAS_PERCENTAGE):
         Recom.loc[i, 'bias_value'] = max(-mxv, Recom.loc[i, 'bias_value'])
         Recom.loc[i, 'bias_value'] = min(mxv, Recom.loc[i, 'bias_value'])
         if 'Oxygen' in Recom.loc[i, 'f_description']: o2_idx = i
+        elif 'O2' in Recom.loc[i, 'f_description']: o2_idx = i
     Recom['value'] = Recom['current_value'] + Recom['bias_value']
 
     # Calculate O2 Set Point based on GrossMW from DCS
@@ -273,6 +269,9 @@ def bg_get_ml_recommendation():
             q = f"""UPDATE {_DB_NAME_}.tb_bat_raw
                     SET f_value=1,f_date_rec=NOW(),f_updated_at=NOW()
                     WHERE f_address_no='{config.TAG_COPT_ISCALLING}' """
+            q = f"""REPLACE INTO {_DB_NAME_}.tb_bat_raw
+                    (f_value, f_date_rec, f_updated_at, f_address_no) VALUES
+                    (1, NOW(), NOW(), "{config.TAG_COPT_ISCALLING}") """
             with engine.connect() as conn:
                 res = conn.execute(q)
 
@@ -281,6 +280,9 @@ def bg_get_ml_recommendation():
             q = f"""UPDATE {_DB_NAME_}.tb_bat_raw
                     SET f_value=0,f_date_rec=NOW(),f_updated_at=NOW()
                     WHERE f_address_no='{config.TAG_COPT_ISCALLING}' """
+            q = f"""REPLACE INTO {_DB_NAME_}.tb_bat_raw
+                    (f_value, f_date_rec, f_updated_at, f_address_no) VALUES
+                    (1, NOW(), NOW(), "{config.TAG_COPT_ISCALLING}") """
             with engine.connect() as conn:
                 res = conn.execute(q)
             

@@ -46,6 +46,7 @@ def alarm_history():
     
     try:
         data['object'] = get_alarm_history(page,limit)
+        data['total'] = len(data['object'])
         data['message'] = 'Success'
     except Exception as E:
         data['object'] = []
