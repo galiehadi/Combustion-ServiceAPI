@@ -127,13 +127,6 @@ def bg_safeguard_update():
     # If combustion is enabled and safeguard is down, disable the recommendations, revert back to its original condition
     # and append alarm history
     if combustion_enable and not safeguard_status:
-        # # Disable COPT (not turning off COPT, just send alarm to OPC)
-        # q = f"""UPDATE {_DB_NAME_}.tb_bat_raw SET f_date_rec = NOW(), f_value = 0, f_updated_at = NOW()
-        #         WHERE f_address_no = (SELECT conf.f_tag_name FROM {_DB_NAME_}.tb_tags_read_conf conf
-        #                             WHERE f_description = "{config.DESC_ENABLE_COPT}")"""
-        # with engine.connect() as conn:
-        #     res = conn.execute(q)
-
         q = f"""SELECT f_tag_name FROM {_DB_NAME_}.tb_tags_read_conf conf
                 WHERE f_description = "Excess O2" """
         o2_recom_tag = pd.read_sql(q, con).values[0][0]
@@ -267,20 +260,17 @@ def bg_get_ml_recommendation():
             q = f"""UPDATE {_DB_NAME_}.tb_bat_raw
                     SET f_value=1,f_date_rec=NOW(),f_updated_at=NOW()
                     WHERE f_address_no='{config.TAG_COPT_ISCALLING}' """
-            # q = f"""REPLACE INTO {_DB_NAME_}.tb_bat_raw
-            #         (f_value, f_date_rec, f_updated_at, f_address_no) VALUES
-            #         (1, NOW(), NOW(), "{config.TAG_COPT_ISCALLING}") """
             with engine.connect() as conn:
                 res = conn.execute(q)
+
+            # Bumpless
+            bg_write_recommendation_to_opc
 
             response = requests.get(f'http://{_LOCAL_IP_}:5000/bat_combustion/{_UNIT_CODE_}/realtime')
 
             q = f"""UPDATE {_DB_NAME_}.tb_bat_raw
                     SET f_value=0,f_date_rec=NOW(),f_updated_at=NOW()
                     WHERE f_address_no='{config.TAG_COPT_ISCALLING}' """
-            # q = f"""REPLACE INTO {_DB_NAME_}.tb_bat_raw
-            #         (f_value, f_date_rec, f_updated_at, f_address_no) VALUES
-            #         (1, NOW(), NOW(), "{config.TAG_COPT_ISCALLING}") """
             with engine.connect() as conn:
                 res = conn.execute(q)
             

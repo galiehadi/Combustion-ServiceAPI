@@ -1,6 +1,6 @@
 from distutils.log import debug
 from flask import Flask, request, jsonify
-from flask_cors import CORS, cross_origin
+#from flask_cors import CORS, cross_origin
 from itsdangerous import json
 from UiService import *
 from BackgroundService import *
@@ -9,12 +9,11 @@ import logging
 # log = logging.getLogger('werkzeug')
 # log.setLevel(logging.ERROR)
 app = Flask(__name__)
-cors = CORS(app, supports_credentials=True)
+#cors = CORS(app, supports_credentials=True)
 debug_mode = False
 
 # ================================== Service UI ================================== #
 @app.route('/service/copt/bat/combustion/indicator')
-@cross_origin(supports_credentials=True)
 def indicator():
     data = {
         'message': 'Failed',
