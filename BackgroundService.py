@@ -97,6 +97,12 @@ def bg_safeguard_update():
 
     O2_tag, GrossMW_tag, COPTenable_name = ['excess_o2', 'generator_gross_load', config.DESC_ENABLE_COPT]
 
+    # Always update safeguard status
+    q = f"""UPDATE {_DB_NAME_}.tb_bat_raw SET f_date_rec=NOW(), f_value={1 if safeguard_status else 0}, f_updated_at=NOW()
+            WHERE f_address_no = "{config.SAFEGUARD_TAG}" """
+    with engine.connect() as conn:
+        res = conn.execute(q)
+
     # Get current condition
     q = f"""SELECT NOW() AS f_date_rec, f_description as name, raw.f_value FROM {_DB_NAME_}.tb_tags_read_conf conf
             LEFT JOIN {_DB_NAME_}.tb_bat_raw raw
@@ -117,14 +123,6 @@ def bg_safeguard_update():
     combustion_enable = bool(df[config.DESC_ENABLE_COPT])
     mw_current = df[GrossMW_tag]
     o2_current = df[O2_tag]
-
-    # Always update safeguard status
-    q = f"""UPDATE {_DB_NAME_}.tb_bat_raw SET f_date_rec=NOW(), f_value={1 if safeguard_status else 0}, f_updated_at=NOW()
-            WHERE f_address_no = "{config.SAFEGUARD_TAG}" """
-    q = f"""REPLACE INTO {_DB_NAME_}.tb_bat_raw (f_address_no, f_date_rec, f_value, f_updated_at)
-            VALUES ('{config.SAFEGUARD_TAG}', NOW(), {1 if safeguard_status else 0}, NOW());"""
-    with engine.connect() as conn:
-        res = conn.execute(q)
 
     # If combustion is enabled and safeguard is down, disable the recommendations, revert back to its original condition
     # and append alarm history
@@ -269,9 +267,9 @@ def bg_get_ml_recommendation():
             q = f"""UPDATE {_DB_NAME_}.tb_bat_raw
                     SET f_value=1,f_date_rec=NOW(),f_updated_at=NOW()
                     WHERE f_address_no='{config.TAG_COPT_ISCALLING}' """
-            q = f"""REPLACE INTO {_DB_NAME_}.tb_bat_raw
-                    (f_value, f_date_rec, f_updated_at, f_address_no) VALUES
-                    (1, NOW(), NOW(), "{config.TAG_COPT_ISCALLING}") """
+            # q = f"""REPLACE INTO {_DB_NAME_}.tb_bat_raw
+            #         (f_value, f_date_rec, f_updated_at, f_address_no) VALUES
+            #         (1, NOW(), NOW(), "{config.TAG_COPT_ISCALLING}") """
             with engine.connect() as conn:
                 res = conn.execute(q)
 
@@ -280,9 +278,9 @@ def bg_get_ml_recommendation():
             q = f"""UPDATE {_DB_NAME_}.tb_bat_raw
                     SET f_value=0,f_date_rec=NOW(),f_updated_at=NOW()
                     WHERE f_address_no='{config.TAG_COPT_ISCALLING}' """
-            q = f"""REPLACE INTO {_DB_NAME_}.tb_bat_raw
-                    (f_value, f_date_rec, f_updated_at, f_address_no) VALUES
-                    (1, NOW(), NOW(), "{config.TAG_COPT_ISCALLING}") """
+            # q = f"""REPLACE INTO {_DB_NAME_}.tb_bat_raw
+            #         (f_value, f_date_rec, f_updated_at, f_address_no) VALUES
+            #         (1, NOW(), NOW(), "{config.TAG_COPT_ISCALLING}") """
             with engine.connect() as conn:
                 res = conn.execute(q)
             
@@ -376,6 +374,7 @@ def bg_ml_runner():
             Recom = pd.read_sql(q, con)
             set_point_oxygen = Recom[Recom['f_description'] == 'Excess Oxygen Sensor']['value']
             if (abs(set_point_oxygen - current_oxygen) < config.OXYGEN_STEADY_STATE_LEVEL): 
+                logging('Oxygen is in steady state level.')
                 return {'message': 'Oxygen is in steady state level.'}
             
             # Write recommendation to OPC
