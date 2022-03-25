@@ -1,7 +1,7 @@
 from operator import index
 import pandas as pd
 import numpy as np
-import time, sqlalchemy, requests, config, re
+import time, sqlalchemy, requests, config, re, traceback
 from urllib.parse import quote_plus as urlparse
 from pprint import pprint
 from regional_regressor import RegionalLinearReg
@@ -14,11 +14,6 @@ _IP_ = config._IP_
 _DB_NAME_ = config._DB_NAME_
 _LOCAL_IP_ = config._LOCAL_IP_
 _LOCAL_MODE_ = False
-
-# _LOCAL_MODE_ = True
-# if _LOCAL_MODE_:
-#     _IP_ = 'localhost:3308'
-#     _LOCAL_IP_ = 'localhost'
 
 # Default values
 DEBUG_MODE = True
@@ -127,6 +122,7 @@ def bg_safeguard_update():
     # If combustion is enabled and safeguard is down, disable the recommendations, revert back to its original condition
     # and append alarm history
     if combustion_enable and not safeguard_status:
+        # Send alarm to OPC
         q = f"""SELECT f_tag_name FROM {_DB_NAME_}.tb_tags_read_conf conf
                 WHERE f_description = "Excess O2" """
         o2_recom_tag = pd.read_sql(q, con).values[0][0]
@@ -148,12 +144,31 @@ def bg_safeguard_update():
         AlarmDF = pd.DataFrame(Alarms)
         AlarmDF.to_sql('tb_combustion_alarm_history', con, if_exists='append', index=False)
 
-        # Write alarm 102 to DCS
-        q = f"""INSERT IGNORE INTO {_DB_NAME_}.tb_opc_write_copt
-                SELECT f_tag_name AS tag_name, NOW() AS ts, 102 AS value FROM {_DB_NAME_}.tb_tags_write_conf ttwc 
-                WHERE f_description = "{config.DESC_ALARM}" """
-        with engine.connect() as conn:
-            res = conn.execute(q)
+        # Write alarm 102 to DCS 
+        for table in ['tb_opc_write_copt','tb_opc_write_history_copt']:
+            q = f"""INSERT IGNORE INTO {_DB_NAME_}.{table}
+                    SELECT f_tag_name AS tag_name, NOW() AS ts, 102 AS value FROM {_DB_NAME_}.tb_tags_write_conf ttwc 
+                    WHERE f_description = "{config.DESC_ALARM}" """
+            with engine.connect() as conn:
+                res = conn.execute(q)
+    
+    if safeguard_status:
+        # Checking last alarm
+        q = f"""SELECT value FROM {_DB_NAME_}.tb_opc_write_history_copt
+                WHERE tag_name = (SELECT conf.f_tag_name FROM {_DB_NAME_}.tb_tags_write_conf conf
+                                WHERE f_description = "{config.DESC_ALARM}")
+                ORDER BY ts DESC
+                LIMIT 1"""
+        alarm_current_status = int(pd.read_sql(q, con).values)
+        if alarm_current_status != 100:
+            # Write back alarm 100 to DCS 
+            for table in ['tb_opc_write_copt','tb_opc_write_history_copt']:
+                q = f"""INSERT IGNORE INTO {_DB_NAME_}.{table}
+                        SELECT f_tag_name AS tag_name, NOW() AS ts, 100 AS value FROM {_DB_NAME_}.tb_tags_write_conf ttwc 
+                        WHERE f_description = "{config.DESC_ALARM}" """
+                with engine.connect() as conn:
+                    res = conn.execute(q)
+            logging(f'Write to OPC: {config.DESC_ALARM}: 102 changed to 100')
     return S
 
 
@@ -166,15 +181,16 @@ def bg_get_recom_exec_interval():
 
 def bg_write_recommendation_to_opc(MAX_BIAS_PERCENTAGE):
     # Enable Status
-    q = f"""SELECT conf.description, raw.f_value FROM {_DB_NAME_}.tb_bat_raw raw
-            LEFT JOIN {_DB_NAME_}.tb_combustion_conf_tags conf
-            ON raw.f_address_no = conf.tag_name
-            WHERE conf.category LIKE "%Enable%" 
+    q = f"""SELECT conf.f_description, raw.f_value FROM {_DB_NAME_}.tb_bat_raw raw
+            LEFT JOIN {_DB_NAME_}.tb_tags_read_conf conf
+            ON raw.f_address_no = conf.f_tag_name
+            WHERE conf.f_category LIKE "%ENABLE%" 
             """
-    Enable_status_df = pd.read_sql(q, con).set_index('description')['f_value']
+    Enable_status_df = pd.read_sql(q, con).set_index('f_description')['f_value']
+    Enable_status_df = Enable_status_df.replace(np.nan, 0)
 
     # Enable tags
-    q = f"""SELECT f_category, f_description, f_tag_name FROM db_bat_tja1.tb_tags_write_conf
+    q = f"""SELECT f_category, f_description, f_tag_name FROM {_DB_NAME_}.tb_tags_write_conf
             WHERE f_tag_use = "COPT" """
     Write_tags = pd.read_sql(q, con)
     Write_tags
@@ -189,14 +205,18 @@ def bg_write_recommendation_to_opc(MAX_BIAS_PERCENTAGE):
         }
 
     # Limit recommendations to +- MAX_BIAS_PERCENTAGE %
-    q = f"""SELECT gen.model_id, gen.ts, conf.f_tag_name, conf.f_description, 
-            gen.value, gen.bias_value, gen.enable_status, gen.value - gen.bias_value AS 'current_value' 
-            FROM {_DB_NAME_}.tb_tags_read_conf conf
-            LEFT JOIN {_DB_NAME_}.tb_combustion_model_generation gen
-            ON conf.f_description = gen.tag_name 
-            WHERE f_category = "Recommendation"
-            AND gen.ts = (SELECT MAX(ts) FROM {_DB_NAME_}.tb_combustion_model_generation tcmg)"""
+    q = f"""SELECT gen.model_id, gen.ts, conf.f_tag_name, conf.f_description, gen.value, gen.bias_value, gen.enable_status, 
+            (CASE WHEN gen.tag_name = "Total Secondary Air Flow" THEN AVG(raw.f_value*2) ELSE raw.f_value END) AS current_value
+            FROM tb_combustion_model_generation gen
+            LEFT JOIN tb_tags_read_conf conf
+            ON gen.tag_name = conf.f_description 
+            LEFT JOIN tb_bat_raw raw 
+            ON conf.f_tag_name = raw.f_address_no 
+            WHERE gen.ts = (SELECT MAX(ts) FROM tb_combustion_model_generation gen)
+            AND conf.f_category != "Recommendation"
+            GROUP BY gen.tag_name"""
     Recom = pd.read_sql(q, con)
+    Recom['bias_value'] = Recom['value'] - Recom['current_value']
 
     o2_idx = None
     # Limit recommendation to MAX_BIAS_PERCENTAGE %
@@ -216,9 +236,10 @@ def bg_write_recommendation_to_opc(MAX_BIAS_PERCENTAGE):
     dcs_mw = pd.read_sql(q, con).values[0][0]
     dcs_o2 = DCS_O2.predict(dcs_mw)
 
-    opc_write = Recom[['f_tag_name','ts','value']]
+    opc_write = Recom.merge(Write_tags, how='left', left_on='f_description', right_on='f_description')[['f_tag_name_y','ts','value']].dropna()
     opc_write.columns = ['tag_name','ts','value']
-    opc_write['ts'] = pd.to_datetime('now')
+    opc_write['ts'] = pd.to_datetime('now') + pd.Timedelta('7H')
+    #opc_write.loc[opc_write.index[-1], 'ts'] = pd.to_datetime('now')
 
     if o2_idx is not None:
         opc_write.loc[o2_idx, 'value'] = opc_write.loc[o2_idx, 'value'] - dcs_o2
@@ -260,17 +281,20 @@ def bg_get_ml_recommendation():
             q = f"""UPDATE {_DB_NAME_}.tb_bat_raw
                     SET f_value=1,f_date_rec=NOW(),f_updated_at=NOW()
                     WHERE f_address_no='{config.TAG_COPT_ISCALLING}' """
+            # q = f"""REPLACE INTO {_DB_NAME_}.tb_bat_raw
+            #         (f_value, f_date_rec, f_updated_at, f_address_no) VALUES
+            #         (1, NOW(), NOW(), "{config.TAG_COPT_ISCALLING}") """
             with engine.connect() as conn:
                 res = conn.execute(q)
-
-            # Bumpless
-            bg_write_recommendation_to_opc
 
             response = requests.get(f'http://{_LOCAL_IP_}:5000/bat_combustion/{_UNIT_CODE_}/realtime')
 
             q = f"""UPDATE {_DB_NAME_}.tb_bat_raw
                     SET f_value=0,f_date_rec=NOW(),f_updated_at=NOW()
                     WHERE f_address_no='{config.TAG_COPT_ISCALLING}' """
+            # q = f"""REPLACE INTO {_DB_NAME_}.tb_bat_raw
+            #         (f_value, f_date_rec, f_updated_at, f_address_no) VALUES
+            #         (1, NOW(), NOW(), "{config.TAG_COPT_ISCALLING}") """
             with engine.connect() as conn:
                 res = conn.execute(q)
             
@@ -284,7 +308,7 @@ def bg_get_ml_recommendation():
             with engine.connect() as conn:
                 res = conn.execute(q)
     except Exception as e:
-        logging(f'Machine learning prediction error: {e}')
+        logging(f'Machine learning prediction error: {traceback.format_exc()}')
         return str(e)
 
 def bg_ml_runner():
@@ -321,20 +345,28 @@ def bg_ml_runner():
     logging(f'DEBUG_MODE: {DEBUG_MODE}')
     
     if DEBUG_MODE:
-        # Get latest recommendations time
-        q = f"""SELECT MAX(ts) FROM {_DB_NAME_}.tb_combustion_model_generation"""
-        df = pd.read_sql(q, con)
-        try: LATEST_RECOMMENDATION_TIME = pd.to_datetime(df.values[0][0])
-        except Exception as e: logging(f"Error on line 241:", str(e)) 
+        if ENABLE_COPT:
+            # Change DEBUG_MODE to False
+            q = f"""UPDATE {_DB_NAME_}.tb_combustion_parameters
+                    SET f_default_value=0
+                    WHERE f_label="DEBUG_MODE";"""
+            with engine.connect() as conn:
+                conn.execute(q)
+        else:
+            # Get latest recommendations time
+            q = f"""SELECT MAX(ts) FROM {_DB_NAME_}.tb_combustion_model_generation"""
+            df = pd.read_sql(q, con)
+            try: LATEST_RECOMMENDATION_TIME = pd.to_datetime(df.values[0][0])
+            except Exception as e: logging(f"Error on line 241:", str(e)) 
 
-        # Return if latest recommendation is under RECOM_EXEC_INTERVAL minute
-        now = pd.to_datetime(time.ctime())
-        if (now - LATEST_RECOMMENDATION_TIME) < pd.Timedelta(f'{RECOM_EXEC_INTERVAL}min'):
-            return {'message':f"Waiting to next {LATEST_RECOMMENDATION_TIME + pd.Timedelta(f'{RECOM_EXEC_INTERVAL}min') - now} min"}
-        
-        # Calling ML Recommendations to the latest recommendation
-        val = bg_get_ml_recommendation()
-        return {'message': f"Value: {val}"}
+            # Return if latest recommendation is under RECOM_EXEC_INTERVAL minute
+            now = pd.to_datetime(time.ctime())
+            if (now - LATEST_RECOMMENDATION_TIME) < pd.Timedelta(f'{RECOM_EXEC_INTERVAL}min'):
+                return {'message':f"Waiting to next {LATEST_RECOMMENDATION_TIME + pd.Timedelta(f'{RECOM_EXEC_INTERVAL}min') - now} min"}
+            
+            # Calling ML Recommendations to the latest recommendation
+            val = bg_get_ml_recommendation()
+            return {'message': f"Value: {val}"}
 
     elif ENABLE_COPT:
         # Get latest recommendations time
@@ -362,9 +394,9 @@ def bg_ml_runner():
                     WHERE f_category = "Recommendation"
                     AND gen.ts = (SELECT MAX(ts) FROM {_DB_NAME_}.tb_combustion_model_generation tcmg)"""
             Recom = pd.read_sql(q, con)
-            set_point_oxygen = Recom[Recom['f_description'] == 'Excess Oxygen Sensor']['value']
+            set_point_oxygen = float(Recom[Recom['f_description'] == 'Excess O2']['value'])
             if (abs(set_point_oxygen - current_oxygen) < config.OXYGEN_STEADY_STATE_LEVEL): 
-                logging('Oxygen is in steady state level.')
+                logging(f'Oxygen is in steady state level ({current_oxygen}).')
                 return {'message': 'Oxygen is in steady state level.'}
             
             # Write recommendation to OPC

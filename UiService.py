@@ -1,6 +1,6 @@
 import pandas as pd
 import numpy as np
-import time, config
+import time, config, traceback
 from urllib.parse import quote_plus as urlparse
 from pprint import pprint
 
@@ -15,18 +15,19 @@ con = f"mysql+mysqlconnector://{_USER_}:{_PASS_}@{_IP_}/{_DB_NAME_}"
 
 def get_status():
     keys = [config.WATCHDOG_TAG, config.SAFEGUARD_TAG, config.DESC_ENABLE_COPT]
-    q = f"""SELECT f_tag_name FROM {_DB_NAME_}.tb_tags_read_conf ttrc 
-            WHERE f_description = "{config.DESC_ENABLE_COPT}" """
-    try: keys[2] = pd.read_sql(q, con).values[0][0]
-    except Exception as e: print(f'Error on line 21: {e}')
-    
-    q = f"""SELECT f_address_no, f_value FROM {_DB_NAME_}.tb_bat_raw tbr 
-            WHERE f_address_no IN {tuple(keys)}"""
-    df = pd.read_sql(q, con)
+    q = f"""SELECT conf.f_description AS f_address_no, raw.f_value FROM tb_bat_raw raw
+        LEFT JOIN tb_tags_read_conf conf
+        ON raw.f_address_no = conf.f_tag_name
+        WHERE conf.f_description IN {tuple(keys)}
+        UNION
+        SELECT f_address_no, f_value FROM tb_bat_raw
+        WHERE f_address_no IN {tuple(keys)}"""
+    df = pd.read_sql(q, con).replace(np.nan, 0)
     status = {}
     for k in keys:
         if k in df['f_address_no'].values: status[k] = df[df['f_address_no'] == k]['f_value'].values[0]
-        else: status[k] = None
+        elif np.isnan(status[k]): status[k] = 0
+        else: status[k] = 0
     return status[keys[0]], status[keys[1]], status[keys[2]]
 
 def get_comb_tags():
@@ -38,6 +39,7 @@ def get_comb_tags():
     df['f_value'] = df['f_value'].astype(str)
     df = df.replace('None',0)
     df = df.set_index('f_desc')
+    df.loc['excess_o2','f_value']  = float(df.loc['excess_o2','f_value']) * 1.6844264 + 0.16792374
     df['f_value'] = df['f_value'].astype(float).round(2)
     df['f_value'] = df['f_value'].astype(str) + ' ' + df['f_units']
     df = df.to_dict()
@@ -56,12 +58,13 @@ def get_recommendations():
             WHERE ts > (SELECT ts FROM {_DB_NAME_}.tb_combustion_model_generation
                         GROUP BY ts ORDER BY ts DESC LIMIT 4, 1)
             AND ts > NOW() - INTERVAL 1 DAY
-            ORDER BY ts DESC"""
+            ORDER BY ts DESC, tag_name ASC"""
     df = pd.read_sql(q, con)
     for c in df.columns[-3:]:
         df[c] = np.round(df[c], 3)
     df_dict = df.astype(str).to_dict('records')
-    last_recommendation = str(df['timestamp'].max())
+    # Hidden message, remove after final program. 
+    last_recommendation = str(df['timestamp'].max()) + ' Currently on development mode'
     
     return df_dict, last_recommendation
 
@@ -183,9 +186,11 @@ def post_rule(payload):
     df = df.set_index('f_address_no')['f_value']
 
     for k in df.index: evaluate = evaluate.replace(k, str(df[k]))
+    evaluate = evaluate.lower().replace("=","==")
+    while "===" in evaluate: evaluate = evaluate.replace("===","==")
 
     try:
-        Safeguard_status = eval(evaluate.lower())
+        Safeguard_status = eval(evaluate)
         qdel = f"""DELETE FROM {_DB_NAME_}.tb_combustion_rules_dtl
                    WHERE f_rule_hdr_id={ruleHeaderId}"""
         

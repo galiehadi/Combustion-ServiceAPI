@@ -4,7 +4,7 @@ from flask import Flask, request, jsonify
 from itsdangerous import json
 from UiService import *
 from BackgroundService import *
-import logging
+import logging, traceback
 
 # log = logging.getLogger('werkzeug')
 # log.setLevel(logging.ERROR)
@@ -236,7 +236,7 @@ def ml_runner():
         data['message'] = 'Success'
     except Exception as E:
         data['object'] = []
-        data['message'] = str(E)
+        data['message'] = str(traceback.format_exc())
     return data
 
 
