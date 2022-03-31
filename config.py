@@ -6,7 +6,7 @@ _UNIT_CODE_ = "PCT1"
 _UNIT_NAME_ = "PLTU Pacitan 1"
 _USER_ = 'root'
 _PASS_ = 'P@ssw0rd'
-_IP_ = 'localhost:3301' #'192.168.32.6:3306'
+_IP_ = '192.168.32.6:3306'
 _LOCAL_IP_ = '192.168.32.6'
 _DB_NAME_ = 'db_bat_pct1'
 
