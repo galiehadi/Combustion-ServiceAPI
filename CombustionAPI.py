@@ -72,7 +72,7 @@ def alarm_history_id(alarmID):
     return data
 
 @app.route('/service/copt/bat/combustion/update/alarm-history/<alarmID>', methods=['POST'])
-def alarm_history_id(alarmID):
+def alarm_history_id_post(alarmID):
     payload = dict(request.get_json())
 
     objects = post_alarm(payload)
