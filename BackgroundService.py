@@ -185,13 +185,15 @@ def bg_write_recommendation_to_opc(MAX_BIAS_PERCENTAGE):
             LEFT JOIN {_DB_NAME_}.tb_tags_read_conf conf
             ON raw.f_address_no = conf.f_tag_name
             WHERE conf.f_category LIKE "%ENABLE%" 
+            AND conf.f_is_active = 1
             """
     Enable_status_df = pd.read_sql(q, con).set_index('f_description')['f_value']
     Enable_status_df = Enable_status_df.replace(np.nan, 0)
 
     # Enable tags
     q = f"""SELECT f_category, f_description, f_tag_name FROM {_DB_NAME_}.tb_tags_write_conf
-            WHERE f_tag_use = "COPT" """
+            WHERE f_tag_use = "COPT"
+            AND f_is_active = 1 """
     Write_tags = pd.read_sql(q, con)
     Write_tags
 
@@ -212,6 +214,7 @@ def bg_write_recommendation_to_opc(MAX_BIAS_PERCENTAGE):
             ON gen.tag_name = conf.f_description 
             WHERE gen.ts = (SELECT MAX(ts) FROM tb_combustion_model_generation gen)
             AND conf.f_category != "Recommendation"
+            AND conf.f_is_active = 1
             GROUP BY conf.f_description """
     Recom = pd.read_sql(q, con)
     Recom['bias_value'] = Recom['value'] - Recom['current_value']
@@ -271,6 +274,7 @@ def bg_write_recommendation_to_opc1(MAX_BIAS_PERCENTAGE):
             LEFT JOIN {_DB_NAME_}.tb_tags_read_conf conf
             ON raw.f_address_no = conf.f_tag_name
             WHERE conf.f_category LIKE "%ENABLE%" 
+            AND conf.f_is_active = 1
             """
     Enable_status_df = pd.read_sql(q, con).set_index('f_description')['f_value']
     Enable_status_df = Enable_status_df.replace(np.nan, 0)
@@ -300,6 +304,7 @@ def bg_write_recommendation_to_opc1(MAX_BIAS_PERCENTAGE):
             ON conf.f_tag_name = raw.f_address_no 
             WHERE gen.ts = (SELECT MAX(ts) FROM tb_combustion_model_generation gen)
             AND conf.f_category != "Recommendation"
+            AND conf.f_is_active = 1
             GROUP BY gen.tag_name"""
     Recom = pd.read_sql(q, con)
     Recom['bias_value'] = Recom['value'] - Recom['current_value']
@@ -409,7 +414,8 @@ def bg_ml_runner():
             LEFT JOIN {_DB_NAME_}.tb_bat_raw raw
             ON conf.f_tag_name = raw.f_address_no 
             WHERE conf.f_description IN ("{config.DESC_ENABLE_COPT}",
-            "{config.DESC_ENABLE_COPT_BT}","{config.DESC_ENABLE_COPT_SEC}") """
+            "{config.DESC_ENABLE_COPT_BT}","{config.DESC_ENABLE_COPT_SEC}")
+            AND conf.f_is_active = 1 """
     df = pd.read_sql(q, con).set_index('f_description')['f_value']
     ENABLE_COPT = df[config.DESC_ENABLE_COPT]
     ENABLE_COPT_BT = df[config.DESC_ENABLE_COPT_BT]
