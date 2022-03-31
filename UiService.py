@@ -111,8 +111,7 @@ def get_rules_detailed(rule_id):
 
 def get_tags_rule():
     q = f"""SELECT "" AS tagKKS, f_tag_name AS tagSensor, f_description AS tagDescription FROM {_DB_NAME_}.tb_tags_read_conf ttrc 
-            WHERE f_tag_use IN ("COPT", "SOPT+COPT", "COPT+SOPT")
-            AND f_is_active != 0"""
+            WHERE f_is_active != 0"""
     df = pd.read_sql(q, con)
     df_dict = df.to_dict('records')
     return df_dict
