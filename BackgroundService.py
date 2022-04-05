@@ -1,7 +1,7 @@
 from operator import index
 import pandas as pd
 import numpy as np
-import time, sqlalchemy, requests, config
+import time, sqlalchemy, requests, config, re
 from urllib.parse import quote_plus as urlparse
 from pprint import pprint
 from regional_regressor import RegionalLinearReg
@@ -14,11 +14,6 @@ _IP_ = config._IP_
 _DB_NAME_ = config._DB_NAME_
 _LOCAL_IP_ = config._LOCAL_IP_
 _LOCAL_MODE_ = False
-
-# _LOCAL_MODE_ = True
-# if _LOCAL_MODE_:
-#     _IP_ = 'localhost:3308'
-#     _LOCAL_IP_ = 'localhost'
 
 # Default values
 DEBUG_MODE = True
@@ -237,6 +232,18 @@ def bg_get_ml_recommendation():
         logging(time.ctime(),'- Machine learning prediction error:', e)
         return str(e)
 
+def bg_get_ml_model_status():
+    q = f"""SELECT message FROM {_DB_NAME_}.tb_combustion_model_message
+        WHERE ts = (SELECT MAX(ts) FROM {_DB_NAME_}.tb_combustion_model_message)
+        AND ts > (NOW() - INTERVAL 1 HOUR) """
+    message = pd.read_sql(q, con)
+    if len(message) > 0:
+        message = message.values[0][0]
+        code = message.split(':')[0]
+        code = int(re.findall('[0-9]+', code)[0])
+        return code
+    return 'Failed'
+
 def bg_ml_runner():
     ENABLE_COPT = 0
     MAX_BIAS_PERCENTAGE = 5
@@ -245,13 +252,18 @@ def bg_ml_runner():
 
     t0 = time.time()
 
-    # Get Enable status
-    q = f"""SELECT raw.f_value FROM {_DB_NAME_}.tb_tags_read_conf conf
+   # Get Enable status
+    q = f"""SELECT conf.f_description, CAST(raw.f_value AS FLOAT) AS f_value
+            FROM {_DB_NAME_}.tb_tags_read_conf conf
             LEFT JOIN {_DB_NAME_}.tb_bat_raw raw
             ON conf.f_tag_name = raw.f_address_no 
-            WHERE conf.f_description = "{config.DESC_ENABLE_COPT}" """
-    df = pd.read_sql(q, con)
-    ENABLE_COPT = df.values[0][0]
+            WHERE conf.f_description IN ("{config.DESC_ENABLE_COPT}",
+            "{config.DESC_ENABLE_COPT_BT}","{config.DESC_ENABLE_COPT_SEC}")
+            """
+    df = pd.read_sql(q, con).set_index('f_description')['f_value']
+    ENABLE_COPT = df[config.DESC_ENABLE_COPT]
+    ENABLE_COPT_BT = df[config.DESC_ENABLE_COPT_BT]
+    ENABLE_COPT_SEC = df[config.DESC_ENABLE_COPT_SEC]
 
     # Get parameters
     q = f"""SELECT f_label, f_default_value FROM {_DB_NAME_}.tb_combustion_parameters tcp 
@@ -263,31 +275,40 @@ def bg_ml_runner():
     if 'RECOM_EXEC_INTERVAL' in parameters.index:
         RECOM_EXEC_INTERVAL = int(parameters['RECOM_EXEC_INTERVAL'])
     if 'DEBUG_MODE' in parameters.index:
-        DEBUG_MODE = False if (parameters['DEBUG_MODE'].lower() in ['0','false',0]) else True
+        DEBUG_MODE = False if (str(int(parameters['DEBUG_MODE'])).lower() in ['0','false',0]) else True
     
-    print(f'DEBUG_MODE: {DEBUG_MODE}')
+    logging(f'DEBUG_MODE: {DEBUG_MODE}')
     
     if DEBUG_MODE:
-        # Get latest recommendations time
-        q = f"""SELECT MAX(ts) FROM {_DB_NAME_}.tb_combustion_model_generation"""
-        df = pd.read_sql(q, con)
-        try: LATEST_RECOMMENDATION_TIME = pd.to_datetime(df.values[0][0])
-        except Exception as e: logging(f"Error on line 241:", str(e)) 
+        if ENABLE_COPT:
+            # Change DEBUG_MODE to False
+            q = f"""UPDATE {_DB_NAME_}.tb_combustion_parameters
+                    SET f_default_value=0
+                    WHERE f_label="DEBUG_MODE";"""
+            with engine.connect() as conn:
+                conn.execute(q)
+        else:
+            # Get latest recommendations time
+            q = f"""SELECT MAX(ts) FROM {_DB_NAME_}.tb_combustion_model_generation"""
+            df = pd.read_sql(q, con)
+            try: LATEST_RECOMMENDATION_TIME = pd.to_datetime(df.values[0][0])
+            except Exception as e: logging(f"Error on line 241:", str(e)) 
 
-        # Return if latest recommendation is under RECOM_EXEC_INTERVAL minute
-        now = pd.to_datetime(time.ctime())
-        if (now - LATEST_RECOMMENDATION_TIME) < pd.Timedelta(f'{RECOM_EXEC_INTERVAL}min'):
-            return {'message':f"Waiting to next {LATEST_RECOMMENDATION_TIME + pd.Timedelta(f'{RECOM_EXEC_INTERVAL}min') - now} min"}
-        
-        # Calling ML Recommendations to the latest recommendation
-        val = bg_get_ml_recommendation()
+            # Return if latest recommendation is under RECOM_EXEC_INTERVAL minute
+            now = pd.to_datetime(time.ctime())
+            if (now - LATEST_RECOMMENDATION_TIME) < pd.Timedelta(f'{RECOM_EXEC_INTERVAL}min'):
+                return {'message':f"Waiting to next {LATEST_RECOMMENDATION_TIME + pd.Timedelta(f'{RECOM_EXEC_INTERVAL}min') - now} min"}
+            
+            # Calling ML Recommendations to the latest recommendation
+            val = bg_get_ml_recommendation()
+            return {'message': f"Value: {val}"}
 
     elif ENABLE_COPT:
         # Get latest recommendations time
         q = f"""SELECT MAX(ts) FROM {_DB_NAME_}.tb_combustion_model_generation"""
         df = pd.read_sql(q, con)
         try: LATEST_RECOMMENDATION_TIME = pd.to_datetime(df.values[0][0])
-        except Exception as e: logging(f"Error on line 256:", str(e)) 
+        except Exception as e: logging(f"Error on line 344: {e}") 
 
         now = pd.to_datetime(time.ctime())
         # TEMPORARY! 
@@ -308,8 +329,9 @@ def bg_ml_runner():
                     WHERE f_category = "Recommendation"
                     AND gen.ts = (SELECT MAX(ts) FROM {_DB_NAME_}.tb_combustion_model_generation tcmg)"""
             Recom = pd.read_sql(q, con)
-            set_point_oxygen = Recom[Recom['f_description'] == 'Excess Oxygen Sensor']['value']
+            set_point_oxygen = float(Recom[Recom['f_description'] == 'Excess O2']['value'])
             if (abs(set_point_oxygen - current_oxygen) < config.OXYGEN_STEADY_STATE_LEVEL): 
+                logging(f'Oxygen is in steady state level ({current_oxygen}).')
                 return {'message': 'Oxygen is in steady state level.'}
             
             # Write recommendation to OPC
@@ -321,7 +343,11 @@ def bg_ml_runner():
             ML = bg_get_ml_recommendation()
 
             if type(ML) is not dict: 
-                return {'message':'Error on ML response. Columns "model_status" not found.'}
+                if 'model_status' not in ML.keys():
+                    try:
+                        ML['model_status'] = int(bg_get_ml_model_status())
+                    except:
+                        return {'message':'Error on ML response. Columns "model_status" not found.'}
 
             if ML['model_status'] == 1:
                 try:
