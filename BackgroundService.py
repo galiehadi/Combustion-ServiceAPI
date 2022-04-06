@@ -471,23 +471,14 @@ def bg_ml_runner():
 
     t0 = time.time()
 
-<<<<<<< HEAD
    # Get Enable status
     q = f"""SELECT conf.f_description, CAST(raw.f_value AS FLOAT) AS f_value
             FROM {_DB_NAME_}.tb_tags_read_conf conf
-=======
-    # Get Enable status
-    q = f"""SELECT conf.f_description, raw.f_value FROM {_DB_NAME_}.tb_tags_read_conf conf
->>>>>>> deployment-taa
             LEFT JOIN {_DB_NAME_}.tb_bat_raw raw
             ON conf.f_tag_name = raw.f_address_no 
             WHERE conf.f_description IN ("{config.DESC_ENABLE_COPT}",
             "{config.DESC_ENABLE_COPT_BT}","{config.DESC_ENABLE_COPT_SEC}")
-<<<<<<< HEAD
             """
-=======
-            AND conf.f_is_active = 1 """
->>>>>>> deployment-taa
     df = pd.read_sql(q, con).set_index('f_description')['f_value']
     ENABLE_COPT = df[config.DESC_ENABLE_COPT]
     ENABLE_COPT_BT = df[config.DESC_ENABLE_COPT_BT]
