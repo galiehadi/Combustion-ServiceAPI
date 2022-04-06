@@ -1,15 +1,15 @@
 from distutils.log import debug
 from flask import Flask, request, jsonify
-from flask_cors import CORS
+#from flask_cors import CORS, cross_origin
 from itsdangerous import json
 from UiService import *
 from BackgroundService import *
-import logging
+import logging, traceback
 
 # log = logging.getLogger('werkzeug')
 # log.setLevel(logging.ERROR)
 app = Flask(__name__)
-cors = CORS(app, supports_credentials=True)
+#cors = CORS(app, supports_credentials=True)
 debug_mode = False
 
 # ================================== Service UI ================================== #
@@ -45,6 +45,7 @@ def alarm_history():
     
     try:
         data['object'] = get_alarm_history(page,limit)
+        data['total'] = len(data['object'])
         data['message'] = 'Success'
     except Exception as E:
         data['object'] = []
@@ -181,6 +182,9 @@ def safeguard_check():
     try:
         data['object'] = bg_safeguard_update()
         data['message'] = 'Success'
+        
+        # sisipan
+        bg_update_notification()
     except Exception as E:
         data['object'] = []
         data['message'] = str(E)
@@ -235,7 +239,7 @@ def ml_runner():
         data['message'] = 'Success'
     except Exception as E:
         data['object'] = []
-        data['message'] = str(E)
+        data['message'] = str(traceback.format_exc())
     return data
 
 

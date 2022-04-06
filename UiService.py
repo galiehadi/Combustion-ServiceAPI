@@ -1,6 +1,6 @@
 import pandas as pd
 import numpy as np
-import time, config
+import time, config, traceback, re
 from urllib.parse import quote_plus as urlparse
 from pprint import pprint
 
@@ -14,20 +14,42 @@ _DB_NAME_ = config._DB_NAME_
 con = f"mysql+mysqlconnector://{_USER_}:{_PASS_}@{_IP_}/{_DB_NAME_}"
 
 def get_status():
-    keys = [config.WATCHDOG_TAG,config.SAFEGUARD_TAG,'TAG:ENABLE_COPT']
-    q = f"""SELECT f_tag_name FROM {_DB_NAME_}.tb_tags_read_conf ttrc 
-            WHERE f_description = "Tag Enable COPT" """
-    try: keys[2] = pd.read_sql(q, con).values[0][0]
-    except Exception as e: print(f'Error on line 21: {e}')
-    
-    q = f"""SELECT f_address_no, f_value FROM {_DB_NAME_}.tb_bat_raw tbr 
-            WHERE f_address_no IN {tuple(keys)}"""
-    df = pd.read_sql(q, con)
+    keys = [config.WATCHDOG_TAG, config.SAFEGUARD_TAG, config.DESC_ENABLE_COPT]
+    q = f"""SELECT conf.f_description AS f_address_no, raw.f_value FROM tb_bat_raw raw
+        LEFT JOIN tb_tags_read_conf conf
+        ON raw.f_address_no = conf.f_tag_name
+        WHERE conf.f_description IN {tuple(keys)}
+        UNION
+        SELECT f_address_no, f_value FROM tb_bat_raw
+        WHERE f_address_no IN {tuple(keys)}"""
+    df = pd.read_sql(q, con).replace(np.nan, 0)
     status = {}
     for k in keys:
         if k in df['f_address_no'].values: status[k] = df[df['f_address_no'] == k]['f_value'].values[0]
-        else: status[k] = None
+        elif np.isnan(status[k]): status[k] = 0
+        else: status[k] = 0
     return status[keys[0]], status[keys[1]], status[keys[2]]
+
+def get_o2_converter_parameters():
+    try:
+        q = f"""SELECT hdr.f_rule_hdr_id, hdr.f_rule_descr, dtl.f_tag_sensor, dtl.f_bracket_open, raw.f_value, dtl.f_bracket_close FROM tb_combustion_rules_hdr hdr
+                LEFT JOIN tb_combustion_rules_dtl dtl 
+                ON hdr.f_rule_hdr_id = dtl.f_rule_hdr_id 
+                LEFT JOIN tb_bat_raw raw
+                ON dtl.f_tag_sensor = raw.f_address_no 
+                WHERE hdr.f_is_active = 1
+                AND dtl.f_is_active = 1"""
+        rules = pd.read_sql(q, con)
+        o2_a_params = rules[rules['f_rule_descr'] == 'O2_A_CALLIBRATION']['f_bracket_close'].values[0]
+        o2_b_params = rules[rules['f_rule_descr'] == 'O2_B_CALLIBRATION']['f_bracket_close'].values[0]
+
+        o2_a_intercept, o2_a_coef = [float(f.replace(' ','')) for f in re.findall('[-\s]+[0-9.]+', o2_a_params)]
+        o2_b_intercept, o2_b_coef = [float(f.replace(' ','')) for f in re.findall('[-\s]+[0-9.]+', o2_b_params)]
+
+        return np.average([o2_a_intercept, o2_b_intercept]), np.average([o2_a_coef, o2_b_coef])
+    except:
+        print('Failed to fetch o2 parameters. Giving out the default value ...')
+        return [1.6844264, 0.1679237]
 
 def get_comb_tags():
     q = f"""SELECT cd.f_desc, tbr.f_value, cd.f_units FROM {_DB_NAME_}.cb_display cd 
@@ -38,6 +60,12 @@ def get_comb_tags():
     df['f_value'] = df['f_value'].astype(str)
     df = df.replace('None',0)
     df = df.set_index('f_desc')
+
+    # df.loc['excess_o2','f_value']  = float(df.loc['excess_o2','f_value']) * 1.6844264 + 0.16792374
+
+    o2_intercept, o2_bias = get_o2_converter_parameters()
+    df.loc['excess_o2','f_value']  = float(df.loc['excess_o2','f_value']) * o2_intercept + o2_bias
+
     df['f_value'] = df['f_value'].astype(float).round(2)
     df['f_value'] = df['f_value'].astype(str) + ' ' + df['f_units']
     df = df.to_dict()
@@ -56,12 +84,13 @@ def get_recommendations():
             WHERE ts > (SELECT ts FROM {_DB_NAME_}.tb_combustion_model_generation
                         GROUP BY ts ORDER BY ts DESC LIMIT 4, 1)
             AND ts > NOW() - INTERVAL 1 DAY
-            ORDER BY ts DESC"""
+            ORDER BY ts DESC, tag_name ASC"""
     df = pd.read_sql(q, con)
     for c in df.columns[-3:]:
         df[c] = np.round(df[c], 3)
     df_dict = df.astype(str).to_dict('records')
-    last_recommendation = str(df['timestamp'].max())
+    # Hidden message, remove after final program. 
+    last_recommendation = str(df['timestamp'].max()) # + ' Currently on development mode'
     
     return df_dict, last_recommendation
 
@@ -177,14 +206,17 @@ def post_rule(payload):
     q = q[:-1]
 
     # Value check
-    qcheck = f"SELECT f_address_no, f_value FROM {_DB_NAME_}.tb_bat_raw WHERE f_address_no IN {tuple(tags_used)}"
+    wherescript = f"('{tags_used[0]}')" if len(tags_used) == 1 else tuple(tags_used)
+    qcheck = f"SELECT f_address_no, f_value FROM {_DB_NAME_}.tb_bat_raw WHERE f_address_no IN {wherescript}"
     df = pd.read_sql(qcheck, con)
     df = df.set_index('f_address_no')['f_value']
 
     for k in df.index: evaluate = evaluate.replace(k, str(df[k]))
+    evaluate = evaluate.lower().replace("=","==")
+    while "===" in evaluate: evaluate = evaluate.replace("===","==")
 
     try:
-        Safeguard_status = eval(evaluate.lower())
+        # Safeguard_status = eval(evaluate)
         qdel = f"""DELETE FROM {_DB_NAME_}.tb_combustion_rules_dtl
                    WHERE f_rule_hdr_id={ruleHeaderId}"""
         

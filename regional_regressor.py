@@ -19,6 +19,6 @@ class RegionalLinearReg(object):
         elif x >= self.rangehi:
             return self.Y[-1]
         for i in range(1,len(self.X)):
-            if x < self.X[i] and x > self.X[i-1]:
+            if x <= self.X[i] and x >= self.X[i-1]:
                 return self._map_(x, self.X[i-1], self.X[i], self.Y[i-1], self.Y[i])
         return f'Error using value: {x}'
