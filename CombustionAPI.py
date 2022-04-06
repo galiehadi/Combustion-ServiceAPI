@@ -182,6 +182,9 @@ def safeguard_check():
     try:
         data['object'] = bg_safeguard_update()
         data['message'] = 'Success'
+        
+        # sisipan
+        bg_update_notification()
     except Exception as E:
         data['object'] = []
         data['message'] = str(E)

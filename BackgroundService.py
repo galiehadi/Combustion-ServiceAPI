@@ -29,6 +29,56 @@ def logging(text):
     t = time.strftime('%Y-%m-%d %X')
     print(f"[{t}] - {text}")
 
+def bg_update_notification():
+    # Get status enable now
+    q = f"""SELECT raw.f_address_no, raw.f_value, '' AS f_message, raw.f_updated_at FROM tb_tags_read_conf conf 
+        LEFT JOIN tb_bat_raw raw
+        ON conf.f_tag_name = raw.f_address_no 
+        WHERE f_description = "{config.DESC_ENABLE_COPT}" """
+    df_status_now = pd.read_sql(q, con)
+    tag_name, status_now, message, timestamp_now = df_status_now.iloc[0].values
+    timestamp_now = pd.to_datetime(timestamp_now).strftime('%Y-%m-%d %X')
+
+    # Get latest update on message
+    q = f"""SELECT notif.f_value from tb_tags_read_conf conf
+        LEFT JOIN tb_bat_notif notif 
+        ON conf.f_tag_name = notif.f_address_no 
+        WHERE conf.f_description = "COMBUSTION ENABLE"
+        ORDER BY notif.f_updated_at DESC LIMIT 1"""
+    df_status_last = pd.read_sql(q, con)
+    status_last = df_status_last['f_value'].values[0]
+
+    if status_last != status_now:
+        if int(status_now):
+            message = f'COPT Enabled on {timestamp_now}'
+        else:
+            # Alarm messages
+            q = f"""SELECT f_timestamp, f_desc, f_set_value, f_actual_value FROM tb_combustion_alarm_history
+                WHERE f_timestamp > NOW() - INTERVAL 2 MINUTE
+                ORDER BY f_timestamp DESC """
+            df_alarm = pd.read_sql(q, con)
+            df_alarm = df_alarm.drop_duplicates(subset=['f_desc','f_set_value'], keep='first')
+
+            alarm_message = ' \nSafeguard Violated:'
+            for i in df_alarm.index:
+                alarm_timestamp, _, alarm_set_val, alarm_act_val = df_alarm.loc[i]
+                alarm_timestamp = pd.to_datetime(alarm_timestamp).strftime('%Y-%m-%d %X')
+                alarm = f" \n[{alarm_timestamp}] - {alarm_set_val} ({alarm_act_val})"
+                alarm_message += alarm
+
+            message = f'COPT Disabled on {timestamp_now}.'
+            if len(alarm_message) > 25:
+                message += alarm_message
+        q = f"""INSERT INTO tb_bat_notif (f_address_no,f_value,f_message,f_updated_at)
+                VALUES ("{tag_name}", {status_now}, "{message}", "{timestamp_now}") """
+        print(message)
+        try:
+            with engine.connect() as conn:
+                conn.execute(q)
+        except: pass
+
+    return
+
 def bg_safeguard_check():
     t0 = time.time()
     q = f"""SELECT

@@ -6,7 +6,7 @@ _UNIT_CODE_ = "TAA1"
 _UNIT_NAME_ = "PLTU Tanjung Awar-Awar Unit 1"
 _USER_ = "root"
 _PASS_ = "P@ssw0rd"
-_IP_ = "192.168.1.10:3306"
+_IP_ = "localhost:3306" #"192.168.1.10:3306"
 _LOCAL_IP_ = "192.168.1.10"
 _DB_NAME_ = "db_bat_tja1"
 
