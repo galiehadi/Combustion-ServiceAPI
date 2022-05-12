@@ -97,7 +97,8 @@ def bg_safeguard_check():
             LEFT JOIN {_DB_NAME_}.tb_tags_read_conf conf ON 
                 rule.f_tag_sensor = conf.f_tag_name 
             WHERE
-                hdr.f_rule_descr = "SAFEGUARD"
+                hdr.f_rule_descr = "SAFEGUARD" AND
+                rule.f_is_active = 1
             ORDER BY
                 rule.f_sequence"""
     sg = pd.read_sql(q, con)
@@ -153,6 +154,7 @@ def bg_safeguard_update():
             LEFT JOIN {_DB_NAME_}.tb_bat_raw raw
             ON conf.f_tag_name = raw.f_address_no 
             WHERE conf.f_description = "{config.DESC_ENABLE_COPT}" 
+            AND conf.f_is_active = 1
             UNION 
             SELECT NOW() AS f_date_rec, f_address_no AS name, f_value FROM {_DB_NAME_}.tb_bat_raw raw
             WHERE f_address_no = "{config.SAFEGUARD_TAG}"
@@ -186,7 +188,7 @@ def bg_safeguard_update():
         opc_write = [[o2_recom_tag, ts, o2_bias]]
         opc_write = pd.DataFrame(opc_write, columns=['tag_name','ts','value'])
         
-        opc_write.to_sql('tb_opc_write_copt', con, if_exists='append', index=False)
+        # opc_write.to_sql('tb_opc_write_copt', con, if_exists='append', index=False)
         opc_write.to_sql('tb_opc_write_history_copt', con, if_exists='append', index=False)
 
         # Append alarm history
@@ -298,22 +300,30 @@ def bg_write_recommendation_to_opc(MAX_BIAS_PERCENTAGE):
     dcs_mw = pd.read_sql(q, con).values[0][0]
     dcs_o2 = DCS_O2.predict(dcs_mw)
 
-    opc_write = Recom.merge(Write_tags, how='left', left_on='f_description', right_on='f_description')[['f_tag_name_y','ts','value']].dropna()
+    opc_write = Recom.merge(Write_tags, how='left', left_on='f_description', right_on='f_description')
+    opc_write = opc_write[['f_tag_name_y', 'f_description','ts',config.PARAMETER_BIAS, config.PARAMETER_SET_POINT]].dropna()
+    opc_write['value_to_send'] = 0
+    for i in opc_write.index:
+        desc = opc_write.loc[i, 'f_description']
+        if desc in config.PARAMETER_WRITE.keys():
+            opc_write.loc[i, 'value_to_send'] = opc_write.loc[i, config.PARAMETER_SET_POINT] if config.PARAMETER_WRITE[desc] == config.PARAMETER_SET_POINT else opc_write.loc[i, config.PARAMETER_BIAS]
+    opc_write = opc_write[['f_tag_name_y', 'ts', 'value_to_send']]
+
     opc_write.columns = ['tag_name','ts','value']
     opc_write['ts'] = pd.to_datetime(time.ctime())
 
     if o2_idx is not None:
         opc_write.loc[o2_idx, 'value'] = opc_write.loc[o2_idx, 'value'] - dcs_o2
 
-    # Remove tags that disabled partially
-    for C in Enable_status.keys():
-        if not bool(Enable_status[C]['status']):
-            tags = Enable_status[C]['tag_lists']
-            opc_write = opc_write.drop(index = opc_write[opc_write['tag_name'].isin(tags)].index)
+    # # Remove tags that disabled partially
+    # for C in Enable_status.keys():
+    #     if not bool(Enable_status[C]['status']):
+    #         tags = Enable_status[C]['tag_lists']
+    #         opc_write = opc_write.drop(index = opc_write[opc_write['tag_name'].isin(tags)].index)
     
     opc_write.to_sql('tb_opc_write_copt', con, if_exists='append', index=False)
     opc_write.to_sql('tb_opc_write_history_copt', con, if_exists='append', index=False)
-    logging(f'Write to OPC: {opc_write}')
+    logging(f'Write to OPC: \n{opc_write}\n')
     return 'Done!'
     
 
@@ -390,7 +400,7 @@ def bg_write_recommendation_to_opc1(MAX_BIAS_PERCENTAGE):
             tags = Enable_status[C]['tag_lists']
             opc_write = opc_write.drop(index = opc_write[opc_write['tag_name'].isin(tags)].index)
     
-    opc_write.to_sql('tb_opc_write_copt', con, if_exists='append', index=False)
+    # opc_write.to_sql('tb_opc_write_copt', con, if_exists='append', index=False)
     opc_write.to_sql('tb_opc_write_history_copt', con, if_exists='append', index=False)
     logging(f'Write to OPC: {opc_write}')
     return 'Done!'
