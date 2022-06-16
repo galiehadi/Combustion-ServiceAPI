@@ -15,7 +15,7 @@ con = f"mysql+mysqlconnector://{_USER_}:{_PASS_}@{_IP_}/{_DB_NAME_}"
 engine = create_engine(con)
 
 def save_to_path(dataframe, filename="download"):
-    if not os.path.isdir(_TEMP_FOLDER_): os.mkdir(_TEMP_FOLDER_)
+    if not os.path.isdir(_TEMP_FOLDER_): os.makedirs(_TEMP_FOLDER_)
     filename = f"COPT-{filename}-{time.strftime('%Y-%m-%d %H%M%S')}.csv"
     path = os.path.join(_TEMP_FOLDER_, filename)
     dataframe.to_csv(path, index=False)
