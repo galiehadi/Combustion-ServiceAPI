@@ -3,8 +3,7 @@ import numpy as np
 import time, config, traceback, re
 from urllib.parse import quote_plus as urlparse
 from pprint import pprint
-
-import sqlalchemy
+from sqlalchemy import create_engine
 
 _USER_ = config._USER_
 _PASS_ = urlparse(config._PASS_)
@@ -12,6 +11,7 @@ _IP_ = config._IP_
 _DB_NAME_ = config._DB_NAME_
 
 con = f"mysql+mysqlconnector://{_USER_}:{_PASS_}@{_IP_}/{_DB_NAME_}"
+engine = create_engine(con)
 
 def get_status():
     keys = [config.WATCHDOG_TAG, config.SAFEGUARD_TAG, config.DESC_ENABLE_COPT]
@@ -22,7 +22,7 @@ def get_status():
         UNION
         SELECT f_address_no, f_value FROM tb_bat_raw
         WHERE f_address_no IN {tuple(keys)}"""
-    df = pd.read_sql(q, con).replace(np.nan, 0)
+    df = pd.read_sql(q, engine).replace(np.nan, 0)
     status = {}
     for k in keys:
         if k in df['f_address_no'].values: status[k] = df[df['f_address_no'] == k]['f_value'].values[0]
@@ -39,7 +39,7 @@ def get_o2_converter_parameters():
                 ON dtl.f_tag_sensor = raw.f_address_no 
                 WHERE hdr.f_is_active = 1
                 AND dtl.f_is_active = 1"""
-        rules = pd.read_sql(q, con)
+        rules = pd.read_sql(q, engine)
         o2_a_params = rules[rules['f_rule_descr'] == 'O2_A_CALLIBRATION']['f_bracket_close'].values[0]
         o2_b_params = rules[rules['f_rule_descr'] == 'O2_B_CALLIBRATION']['f_bracket_close'].values[0]
 
@@ -56,7 +56,7 @@ def get_comb_tags():
             LEFT JOIN {_DB_NAME_}.tb_bat_raw tbr 
             ON cd.f_tags = tbr.f_address_no 
             ORDER BY cd.f_desc ASC"""
-    df = pd.read_sql(q, con)
+    df = pd.read_sql(q, engine)
     df['f_value'] = df['f_value'].astype(str)
     df = df.replace('None',0)
     df = df.set_index('f_desc')
@@ -74,7 +74,7 @@ def get_comb_tags():
 
 def get_parameter():
     q = f"""SELECT f_parameter_id AS 'id', f_label AS 'label', f_default_value AS 'value' FROM {_DB_NAME_}.tb_combustion_parameters"""
-    df = pd.read_sql(q, con)
+    df = pd.read_sql(q, engine)
     df = df.to_dict(orient='records')
     
     return df
@@ -85,7 +85,7 @@ def get_recommendations():
                         GROUP BY ts ORDER BY ts DESC LIMIT 4, 1)
             AND ts > NOW() - INTERVAL 1 DAY
             ORDER BY ts DESC, tag_name ASC"""
-    df = pd.read_sql(q, con)
+    df = pd.read_sql(q, engine)
     for c in df.columns[-3:]:
         df[c] = np.round(df[c], 3)
     df_dict = df.astype(str).to_dict('records')
@@ -96,7 +96,7 @@ def get_recommendations():
 
 def get_rules_header():
     q = f"""SELECT f_rule_hdr_id AS id, f_rule_descr AS label FROM {_DB_NAME_}.tb_combustion_rules_hdr"""
-    df = pd.read_sql(q, con)
+    df = pd.read_sql(q, engine)
     df_dict = df.to_dict('records')
     return df_dict
 
@@ -111,7 +111,7 @@ def get_alarm_history(page, limit):
             FROM {_DB_NAME_}.tb_combustion_alarm_history
             ORDER BY f_timestamp DESC
             LIMIT {l1},{l2}"""
-    df = pd.read_sql(q, con)
+    df = pd.read_sql(q, engine)
     df_dict = df.astype(str).to_dict('records')
     return df_dict
 
@@ -120,7 +120,7 @@ def get_specific_alarm_history(alarmID):
             f_set_value AS setValue, f_actual_value AS actualValue, 
             f_desc AS `desc` FROM {_DB_NAME_}.tb_combustion_alarm_history tcah 
             WHERE f_int_id = {alarmID} """
-    df = pd.read_sql(q, con)
+    df = pd.read_sql(q, engine)
     df_dict = df.astype(str).to_dict('records')
     if len(df_dict) > 0:
         return df_dict[0]
@@ -131,7 +131,7 @@ def get_rules_detailed(rule_id):
     q = f"""SELECT f_rule_dtl_id AS ruleDetailId, f_rule_hdr_id AS ruleHeaderId, f_sequence AS sequence, f_bracket_open AS bracketOpen, f_bracket_close AS bracketClose, f_tag_sensor AS tagSensor 
             FROM {_DB_NAME_}.tb_combustion_rules_dtl
             WHERE f_rule_hdr_id = {rule_id} """
-    df = pd.read_sql(q, con)
+    df = pd.read_sql(q, engine)
     df_dict = df.to_dict('records')
     ret = {
         'detailRule': df_dict
@@ -139,10 +139,11 @@ def get_rules_detailed(rule_id):
     return ret
 
 def get_tags_rule():
-    q = f"""SELECT "" AS tagKKS, f_tag_name AS tagSensor, f_description AS tagDescription FROM {_DB_NAME_}.tb_tags_read_conf ttrc 
+    q = f"""SELECT "" AS tagKKS, f_tag_name AS tagSensor, 
+            CONCAT(f_tag_name , " -- ", f_description) AS tagDescription FROM tb_tags_read_conf ttrc 
             WHERE f_tag_use IN ("COPT", "SOPT+COPT", "COPT+SOPT")
             AND f_is_active != 0"""
-    df = pd.read_sql(q, con)
+    df = pd.read_sql(q, engine)
     df_dict = df.to_dict('records')
     return df_dict
 
@@ -167,7 +168,7 @@ def get_indicator():
 def get_parameter_detailed(parameter_id):
     q = f"""SELECT f_parameter_id AS id, f_label AS label, f_default_value AS value FROM {_DB_NAME_}.tb_combustion_parameters
             WHERE f_parameter_id = {parameter_id}"""
-    df = pd.read_sql(q, con)
+    df = pd.read_sql(q, engine)
     if len(df) > 0:
         df_dict = df.to_dict('records')[0]
     else: df_dict = {}
@@ -177,25 +178,25 @@ def post_rule(payload):
     ret = {'Status': 'Failed'}
     
     if type(payload) is not dict: 
-        return ret
+       return ret
     if len(payload.keys()) == 0: 
-        return ret
+       return ret
     if 'detailRule' not in payload.keys():
-        return ret
+       return ret
 
     q = f"""INSERT INTO
-			{_DB_NAME_}.tb_combustion_rules_dtl(f_rule_hdr_id, f_rule_descr, f_tag_sensor, f_rules, f_operator, f_unit, f_limit_high, f_limit_low, f_sequence, f_bracket_open, f_bracket_close, f_is_active, f_updated_at)
+            {_DB_NAME_}.tb_combustion_rules_dtl(f_rule_hdr_id, f_rule_descr, f_tag_sensor, f_rules, f_operator, f_unit, f_limit_high, f_limit_low, f_sequence, f_bracket_open, f_bracket_close, f_is_active, f_updated_at)
             VALUES """
-    
+
     Payload = payload['detailRule']
     evaluate = ''
     tags_used = []
     for P in Payload:
-        print(type(P), P)
         bracketOpen = P['bracketOpen']
         bracketClose = P['bracketClose']
         sequence = P['sequence']
-        tagSensor = [P['tagSensor'][:-1].split('(')[0] if '(' in P['tagSensor'] else P['tagSensor']][0]
+        # tagSensor = [P['tagSensor'][:-1].split('(')[0] if '(' in P['tagSensor'] else P['tagSensor']][0]
+        tagSensor = P['tagSensor'].split(' -- ')[0] if ' -- ' in P['tagSensor'] else P['tagSensor']
         if 'ruleHeaderId' in P.keys(): ruleHeaderId = P['ruleHeaderId']
         else: ruleHeaderId = 20
 
@@ -209,7 +210,7 @@ def post_rule(payload):
     # Value check
     wherescript = f"('{tags_used[0]}')" if len(tags_used) == 1 else tuple(tags_used)
     qcheck = f"SELECT f_address_no, f_value FROM {_DB_NAME_}.tb_bat_raw WHERE f_address_no IN {wherescript}"
-    df = pd.read_sql(qcheck, con)
+    df = pd.read_sql(qcheck, engine)
     df = df.set_index('f_address_no')['f_value']
 
     for k in df.index: evaluate = evaluate.replace(k, str(df[k]))
@@ -217,12 +218,10 @@ def post_rule(payload):
     while "===" in evaluate: evaluate = evaluate.replace("===","==")
 
     try:
-        # Safeguard_status = eval(evaluate)
+        Safeguard_status = eval(evaluate)
         qdel = f"""DELETE FROM {_DB_NAME_}.tb_combustion_rules_dtl
                    WHERE f_rule_hdr_id={ruleHeaderId}"""
         
-        engine = sqlalchemy.create_engine(con)
-
         with engine.connect() as conn:
             red = conn.execute(qdel)
             res = conn.execute(q)
@@ -233,7 +232,6 @@ def post_rule(payload):
         print(E)
         print(evaluate)
         return {'Status': str(E)}
-
     
 
 def post_parameter(payload):
@@ -247,8 +245,6 @@ def post_parameter(payload):
          """
     qdel = f"""DELETE FROM {_DB_NAME_}.tb_combustion_parameters
 	           WHERE f_parameter_id={parameterID}"""
-
-    engine = sqlalchemy.create_engine(con)
 
     with engine.connect() as conn:
         red = conn.execute(qdel)

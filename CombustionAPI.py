@@ -1,5 +1,5 @@
 from distutils.log import debug
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, make_response
 #from flask_cors import CORS, cross_origin
 from itsdangerous import json
 from UiService import *
@@ -152,7 +152,9 @@ def input_rule():
         "page": 0,
         "object": objects
     }
-
+    data = jsonify(data)
+    if (objects['Status'] != "Success"):
+        return make_response(jsonify(data), 404)
     return data
 
 @app.route('/service/copt/bat/combustion/parameter', methods=['POST'])
