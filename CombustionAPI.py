@@ -1,7 +1,8 @@
 from distutils.log import debug
-from flask import Flask, request, jsonify, make_response
-#from flask_cors import CORS, cross_origin
+from flask import Flask, request, jsonify, make_response, send_file
+from flask_cors import CORS, cross_origin
 from itsdangerous import json
+from numpy import asanyarray
 from UiService import *
 from BackgroundService import *
 import logging, traceback
@@ -9,7 +10,7 @@ import logging, traceback
 # log = logging.getLogger('werkzeug')
 # log.setLevel(logging.ERROR)
 app = Flask(__name__)
-#cors = CORS(app, supports_credentials=True)
+cors = CORS(app, supports_credentials=True)
 debug_mode = False
 
 # ================================== Service UI ================================== #
@@ -170,6 +171,24 @@ def input_parameter():
     }
 
     return data
+
+@app.route('/service/copt/bat/combustion/export/<kind>', methods=['GET'])
+def export_to_file(kind):
+    kinds = ['recommendation','parameter-settings','rules-settings','alarm-history']
+    if kind not in kinds: return make_response(f'"{kind}" not found. Please use one of {kinds}', 404)
+
+    if kind == 'recommendation':
+        filepath = get_recommendations(sql_interval='7 DAY', download=True)
+    elif kind == 'parameter-settings':
+        filepath = get_all_parameter()
+    elif kind == 'rules-settings':
+        filepath = get_all_rules_detailed()
+    elif kind == 'alarm-history':
+        filepath = get_alarm_history(0, 400, download=True)
+    else:
+        return f'"{kind}" not found. Please use one of {kinds}'
+    return send_file(filepath, as_attachment=True)
+    
 
 # ================================== Background Service ================================== #
 @app.route('/service/copt/bat/combustion/background/safeguardcheck')

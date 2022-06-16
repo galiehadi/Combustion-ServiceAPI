@@ -1,6 +1,6 @@
 import pandas as pd
 import numpy as np
-import time, config, traceback, re
+import time, config, traceback, re, os
 from urllib.parse import quote_plus as urlparse
 from pprint import pprint
 from sqlalchemy import create_engine
@@ -9,9 +9,17 @@ _USER_ = config._USER_
 _PASS_ = urlparse(config._PASS_)
 _IP_ = config._IP_
 _DB_NAME_ = config._DB_NAME_
+_TEMP_FOLDER_ = config.TEMP_FOLDER
 
 con = f"mysql+mysqlconnector://{_USER_}:{_PASS_}@{_IP_}/{_DB_NAME_}"
 engine = create_engine(con)
+
+def save_to_path(dataframe, filename="download"):
+    if not os.path.isdir(_TEMP_FOLDER_): os.mkdir(_TEMP_FOLDER_)
+    filename = f"COPT-{filename}-{time.strftime('%Y-%m-%d %H%M%S')}.csv"
+    path = os.path.join(_TEMP_FOLDER_, filename)
+    dataframe.to_csv(path, index=False)
+    return path
 
 def get_status():
     keys = [config.WATCHDOG_TAG, config.SAFEGUARD_TAG, config.DESC_ENABLE_COPT]
@@ -79,20 +87,27 @@ def get_parameter():
     
     return df
 
-def get_recommendations():
+def get_recommendations(sql_interval = '1 DAY', download = False):
     q = f"""SELECT ts AS timestamp, tag_name AS 'desc', value AS targetValue, bias_value AS setValue, value-bias_value AS currentValue FROM {_DB_NAME_}.tb_combustion_model_generation
             WHERE ts > (SELECT ts FROM {_DB_NAME_}.tb_combustion_model_generation
                         GROUP BY ts ORDER BY ts DESC LIMIT 4, 1)
-            AND ts > NOW() - INTERVAL 1 DAY
+            OR ts > NOW() - INTERVAL {sql_interval}
             ORDER BY ts DESC, tag_name ASC"""
     df = pd.read_sql(q, engine)
-    for c in df.columns[-3:]:
-        df[c] = np.round(df[c], 3)
-    df_dict = df.astype(str).to_dict('records')
-    # Hidden message, remove after final program. 
-    last_recommendation = str(df['timestamp'].max()) # + ' Currently on development mode'
-    
-    return df_dict, last_recommendation
+    if download:
+        return save_to_path(df, "recommendation")
+
+    else:
+        ts_lists = (df.sort_values('timestamp', ascending=False))['timestamp'].unique()
+        df = df[df['timestamp'] >= ts_lists[3]]
+
+        for c in df.columns[-3:]:
+            df[c] = np.round(df[c], 3)
+        df_dict = df.astype(str).to_dict('records')
+        # Hidden message, remove after final program. 
+        last_recommendation = str(df['timestamp'].max()) # + ' Currently on development mode'
+        
+        return df_dict, last_recommendation
 
 def get_rules_header():
     q = f"""SELECT f_rule_hdr_id AS id, f_rule_descr AS label FROM {_DB_NAME_}.tb_combustion_rules_hdr"""
@@ -100,7 +115,7 @@ def get_rules_header():
     df_dict = df.to_dict('records')
     return df_dict
 
-def get_alarm_history(page, limit):
+def get_alarm_history(page, limit, download=False):
     l1 = 0; l2 = 100
     if bool(page) and bool(limit):
         page = max([int(page),0]); limit = int(limit)
@@ -112,6 +127,8 @@ def get_alarm_history(page, limit):
             ORDER BY f_timestamp DESC
             LIMIT {l1},{l2}"""
     df = pd.read_sql(q, engine)
+    if download:
+        return save_to_path(df)
     df_dict = df.astype(str).to_dict('records')
     return df_dict
 
@@ -137,6 +154,27 @@ def get_rules_detailed(rule_id):
         'detailRule': df_dict
     }
     return ret
+
+def get_all_rules_detailed():
+    q = f"""SELECT
+                hdr.f_rule_hdr_id AS `No`,
+                hdr.f_rule_descr AS `Rule`,
+                rule.f_sequence AS `Sequence`,
+                conf.f_description AS Description,
+                CONCAT(rule.f_bracket_open , rule.f_tag_sensor, rule.f_bracket_close ) AS RuleDetail,
+                CONCAT(rule.f_bracket_open , raw.f_value, rule.f_bracket_close ) AS CurrentValue
+            FROM
+                {_DB_NAME_}.tb_combustion_rules_dtl rule
+            LEFT JOIN {_DB_NAME_}.tb_bat_raw raw ON
+                rule.f_tag_sensor = raw.f_address_no
+            LEFT JOIN {_DB_NAME_}.tb_tags_read_conf conf ON
+                rule.f_tag_sensor = conf.f_tag_name
+            LEFT JOIN {_DB_NAME_}.tb_combustion_rules_hdr hdr ON
+                hdr.f_rule_hdr_id = rule.f_rule_hdr_id
+            WHERE
+                hdr.f_rule_hdr_id > 0; """
+    df = pd.read_sql(q, engine)
+    return save_to_path(df, "rules")
 
 def get_tags_rule():
     q = f"""SELECT "" AS tagKKS, f_tag_name AS tagSensor, 
@@ -173,6 +211,13 @@ def get_parameter_detailed(parameter_id):
         df_dict = df.to_dict('records')[0]
     else: df_dict = {}
     return df_dict
+
+def get_all_parameter():
+    q = f"""SELECT f_parameter_id AS id, f_label AS label, f_default_value AS value FROM {_DB_NAME_}.tb_combustion_parameters
+            WHERE f_is_active = 1"""
+    df = pd.read_sql(q, engine)
+    return save_to_path(df, "parameters")
+
 
 def post_rule(payload):
     ret = {'Status': 'Failed'}
