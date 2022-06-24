@@ -16,9 +16,21 @@ engine = create_engine(con)
 
 def save_to_path(dataframe, filename="download"):
     if not os.path.isdir(_TEMP_FOLDER_): os.makedirs(_TEMP_FOLDER_)
-    filename = f"COPT-{filename}-{time.strftime('%Y-%m-%d %H%M%S')}.csv"
+
+    # Delete all old files
+    files = [os.path.join(_TEMP_FOLDER_, f) for f in os.listdir(_TEMP_FOLDER_)]
+    current_time = time.time()
+    for file in files:
+        try:
+            if (current_time - os.path.getmtime(file)) > (60*60*24): os.remove(file)
+        except Exception as E:
+            print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')} - {E}")
+
+    # Save file, and return file path
+    #filename = f"COPT-{filename}-{time.strftime('%Y-%m-%d %H%M%S')}.csv" # CSV file
+    filename = f"COPT-{filename}-{time.strftime('%Y-%m-%d %H%M%S')}.xlsx" # Excel file
     path = os.path.join(_TEMP_FOLDER_, filename)
-    dataframe.to_csv(path, index=False)
+    dataframe.to_excel(path, index=False)
     return path
 
 def get_status():
