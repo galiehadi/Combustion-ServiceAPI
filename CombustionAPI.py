@@ -174,17 +174,18 @@ def input_parameter():
 
 @app.route('/service/copt/bat/combustion/export/<kind>', methods=['GET'])
 def export_to_file(kind):
+    payload = dict(request.get_json())
     kinds = ['recommendation','parameter-settings','rules-settings','alarm-history']
     if kind not in kinds: return make_response(f'"{kind}" not found. Please use one of {kinds}', 404)
 
     if kind == 'recommendation':
-        filepath = get_recommendations(sql_interval='7 DAY', download=True)
+        filepath = get_recommendations(payload, sql_interval='7 DAY', download=True)
     elif kind == 'parameter-settings':
         filepath = get_all_parameter()
     elif kind == 'rules-settings':
         filepath = get_all_rules_detailed()
     elif kind == 'alarm-history':
-        filepath = get_alarm_history(0, 400, download=True)
+        filepath = get_alarm_history(payload=payload, download=True)
     else:
         return f'"{kind}" not found. Please use one of {kinds}'
     return send_file(filepath, as_attachment=True)

@@ -99,25 +99,36 @@ def get_parameter():
     
     return df
 
-def get_recommendations(sql_interval = '1 DAY', download = False):
+def get_recommendations(payload = None, sql_interval = '1 DAY', download = False):
+    if type(payload) == dict:
+        startDate = pd.to_datetime('now').ceil('1d') 
+        endDate = startDate - pd.to_timedelta('1 day')
+        if 'startDate' in payload.keys():
+            startDate = pd.to_datetime(payload['startDate'])
+        if 'endDate' in payload.keys():
+            endDate = pd.to_datetime(payload['endDate'])
+    else:
+        startDate, endDate = (pd.to_datetime('now'), pd.to_datetime('now') - pd.to_timedelta(sql_interval))
+
+    if download:
+        where_state = f"""WHERE ts BETWEEN "{startDate.strftime('%Y-%m-%d')}" AND "{endDate.strftime('%Y-%m-%d')}" """
+    else:
+        where_state = f"WHERE ts > (SELECT ts FROM {_DB_NAME_}.tb_combustion_model_generation GROUP BY ts ORDER BY ts DESC LIMIT 4, 1)"
+
     q = f"""SELECT ts AS timestamp, tag_name AS 'desc', value AS targetValue, bias_value AS setValue, value-bias_value AS currentValue FROM {_DB_NAME_}.tb_combustion_model_generation
-            WHERE ts > (SELECT ts FROM {_DB_NAME_}.tb_combustion_model_generation
-                        GROUP BY ts ORDER BY ts DESC LIMIT 4, 1)
-            OR ts > NOW() - INTERVAL {sql_interval}
+            {where_state}
             ORDER BY ts DESC, tag_name ASC"""
+    print(q)
     df = pd.read_sql(q, engine)
     if download:
         return save_to_path(df, "recommendation")
 
     else:
-        ts_lists = (df.sort_values('timestamp', ascending=False))['timestamp'].unique()
-        df = df[df['timestamp'] >= ts_lists[3]]
-
         for c in df.columns[-3:]:
             df[c] = np.round(df[c], 3)
         df_dict = df.astype(str).to_dict('records')
-        # Hidden message, remove after final program. 
-        last_recommendation = str(df['timestamp'].max()) # + ' Currently on development mode'
+        
+        last_recommendation = str(df['timestamp'].max())
         
         return df_dict, last_recommendation
 
@@ -127,17 +138,31 @@ def get_rules_header():
     df_dict = df.to_dict('records')
     return df_dict
 
-def get_alarm_history(page, limit, download=False):
-    l1 = 0; l2 = 100
-    if bool(page) and bool(limit):
+def get_alarm_history(page=0, limit=40, payload=None, download=False):
+    l1 = 0; l2 = 100; LIMIT = ""; WHERE = ""
+    if bool(page) or bool(limit):
         page = max([int(page),0]); limit = int(limit)
         l1 = (page) * limit
         l2 = (page+1) * limit
+        WHERE = ""
+        LIMIT = f"LIMIT {l1},{l2}"
+
+    if type(payload) == dict:
+        startDate = pd.to_datetime('now').ceil('1d') 
+        endDate = startDate - pd.to_timedelta('1 day')
+        if 'startDate' in payload.keys():
+            startDate = pd.to_datetime(payload['startDate'])
+        if 'endDate' in payload.keys():
+            endDate = pd.to_datetime(payload['endDate'])
+        WHERE = f"""WHERE f_timestamp BETWEEN "{startDate.strftime('%Y-%m-%d')}" AND "{endDate.strftime('%Y-%m-%d')}" """
+        LIMIT = ""
+
     q = f"""SELECT f_int_id AS alarmId, f_timestamp AS date, f_desc AS 'desc',
             f_set_value AS setValue, f_actual_value AS actualValue
             FROM {_DB_NAME_}.tb_combustion_alarm_history
+            {WHERE}
             ORDER BY f_timestamp DESC
-            LIMIT {l1},{l2}"""
+            {LIMIT}"""
     df = pd.read_sql(q, engine)
     if download:
         return save_to_path(df)
