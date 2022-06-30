@@ -5,7 +5,7 @@ from itsdangerous import json
 from numpy import asanyarray
 from UiService import *
 from BackgroundService import *
-import logging, traceback
+import traceback
 
 # log = logging.getLogger('werkzeug')
 # log.setLevel(logging.ERROR)
@@ -174,7 +174,9 @@ def input_parameter():
 
 @app.route('/service/copt/bat/combustion/export/<kind>', methods=['GET'])
 def export_to_file(kind):
-    payload = dict(request.get_json())
+    payload = request.args.to_dict()
+    logging(f'Payload: {payload}')
+
     kinds = ['recommendation','parameter-settings','rules-settings','alarm-history']
     if kind not in kinds: return make_response(f'"{kind}" not found. Please use one of {kinds}', 404)
 

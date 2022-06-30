@@ -101,14 +101,14 @@ def get_parameter():
 
 def get_recommendations(payload = None, sql_interval = '1 DAY', download = False):
     if type(payload) == dict:
-        startDate = pd.to_datetime('now').ceil('1d') 
-        endDate = startDate - pd.to_timedelta('1 day')
+        endDate = pd.to_datetime('now').ceil('1d') 
+        startDate = endDate - pd.to_timedelta('7 day')
         if 'startDate' in payload.keys():
             startDate = pd.to_datetime(payload['startDate'])
         if 'endDate' in payload.keys():
             endDate = pd.to_datetime(payload['endDate'])
     else:
-        startDate, endDate = (pd.to_datetime('now'), pd.to_datetime('now') - pd.to_timedelta(sql_interval))
+        startDate, endDate = (pd.to_datetime('now') - pd.to_timedelta(sql_interval), pd.to_datetime('now'))
 
     if download:
         where_state = f"""WHERE ts BETWEEN "{startDate.strftime('%Y-%m-%d')}" AND "{endDate.strftime('%Y-%m-%d')}" """
@@ -118,7 +118,7 @@ def get_recommendations(payload = None, sql_interval = '1 DAY', download = False
     q = f"""SELECT ts AS timestamp, tag_name AS 'desc', value AS targetValue, bias_value AS setValue, value-bias_value AS currentValue FROM {_DB_NAME_}.tb_combustion_model_generation
             {where_state}
             ORDER BY ts DESC, tag_name ASC"""
-    print(q)
+
     df = pd.read_sql(q, engine)
     if download:
         return save_to_path(df, "recommendation")
