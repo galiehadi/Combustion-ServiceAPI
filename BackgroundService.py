@@ -17,9 +17,8 @@ _LOCAL_MODE_ = False
 
 # Default values
 DEBUG_MODE = True
-dcs_x = [ 0, 38.291, 55.29, 72.67, 75.83, 100] # Dalam persen
-dcs_x = [ 0, 134.0185, 193.515, 254.345, 265.405, 350]
-dcs_y = [12,      8.0,    4.75,    3.50,    3.50, 3.5]
+dcs_x = config.DCS_X
+dcs_y = config.DCS_Y
 DCS_O2 = RegionalLinearReg(dcs_x, dcs_y)
 
 con = f"mysql+mysqlconnector://{_USER_}:{_PASS_}@{_IP_}/{_DB_NAME_}"
@@ -488,7 +487,7 @@ def bg_get_ml_recommendation():
             with engine.connect() as conn:
                 res = conn.execute(q)
 
-            response = requests.get(f'http://{_LOCAL_IP_}:5000/bat_combustion/{_UNIT_CODE_}/realtime')
+            response = requests.get(f'http://{_LOCAL_IP_}/bat_combustion/{_UNIT_CODE_}/realtime')
 
             q = f"""UPDATE {_DB_NAME_}.tb_bat_raw
                     SET f_value=0,f_date_rec=NOW(),f_updated_at=NOW()
@@ -525,8 +524,7 @@ def bg_ml_runner():
             LEFT JOIN {_DB_NAME_}.tb_bat_raw raw
             ON conf.f_tag_name = raw.f_address_no 
             WHERE conf.f_description IN ("{config.DESC_ENABLE_COPT}",
-            "{config.DESC_ENABLE_COPT_BT}","{config.DESC_ENABLE_COPT_SEC}")
-            AND conf.f_is_active = 1 """
+            "{config.DESC_ENABLE_COPT_BT}","{config.DESC_ENABLE_COPT_SEC}") """
     df = pd.read_sql(q, engine).set_index('f_description')['f_value']
     ENABLE_COPT = df[config.DESC_ENABLE_COPT]
     ENABLE_COPT_BT = df[config.DESC_ENABLE_COPT_BT]

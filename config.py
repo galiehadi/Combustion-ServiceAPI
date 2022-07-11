@@ -2,13 +2,13 @@
 Setting parameter untuk koneksi ke database.
 """
 
-_UNIT_CODE_ = "TAA1"
-_UNIT_NAME_ = "PLTU Tanjung Awar-Awar Unit 1"
+_UNIT_CODE_ = "RBG1"
+_UNIT_NAME_ = "PLTU Rembang Unit 1"
 _USER_ = "root"
 _PASS_ = "P@ssw0rd"
-_IP_ = "10.7.1.116:33002" # "192.168.1.10:3306" # 
-_LOCAL_IP_ = "192.168.1.10"
-_DB_NAME_ = "db_bat_tja1"
+_IP_ = "10.7.1.116:33011" # "35.219.48.62" # 
+_LOCAL_IP_ = "0.0.0.0:5002"
+_DB_NAME_ = "db_bat_rmb1"
 
 "Setting parameter nama variabel"
 
@@ -45,3 +45,8 @@ PARAMETER_WRITE = {
 }
 
 TEMP_FOLDER = 'data/temp/'
+
+"Setting Karakter O2 di DCS"
+DCS_Xp = [ 0,   45,   77,   91,  100] # Dalam persen
+DCS_X  = [ 0,  150,  255,  300,  330]
+DCS_Y  = [ 8,    6,  4.5,    4,    4]
