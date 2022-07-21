@@ -4,7 +4,7 @@ Setting parameter untuk koneksi ke database.
 
 _UNIT_CODE_ = "RBG1"
 _UNIT_NAME_ = "PLTU Rembang Unit 1"
-_USER_ = "root"
+_USER_ = "bat_copt"
 _PASS_ = "P@ssw0rd"
 _IP_ = "10.7.1.116:33011" # "35.219.48.62" # 
 _LOCAL_IP_ = "0.0.0.0:5002"
@@ -30,10 +30,14 @@ PARAMETER_SET_POINT = 'value'
 
 PARAMETER_WRITE = {
     'All Wind': PARAMETER_BIAS,
-    'Burner Tilt Position 0': PARAMETER_BIAS,
-    'Burner Tilt Position 1': PARAMETER_BIAS,
-    'Burner Tilt Position 2': PARAMETER_BIAS,
-    'Burner Tilt Position 3': PARAMETER_BIAS,
+    'Burner Tilt Position 1L': PARAMETER_BIAS,
+    'Burner Tilt Position 1R': PARAMETER_BIAS,
+    'Burner Tilt Position 2L': PARAMETER_BIAS,
+    'Burner Tilt Position 2R': PARAMETER_BIAS,
+    'Burner Tilt Position 3L': PARAMETER_BIAS,
+    'Burner Tilt Position 3R': PARAMETER_BIAS,
+    'Burner Tilt Position 4L': PARAMETER_BIAS,
+    'Burner Tilt Position 4R': PARAMETER_BIAS,
     'Excess O2': PARAMETER_SET_POINT,
     'Mill A Outlet Temperature': PARAMETER_SET_POINT,
     'Mill B Outlet Temperature': PARAMETER_SET_POINT,

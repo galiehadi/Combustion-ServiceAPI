@@ -69,7 +69,7 @@ def get_o2_converter_parameters():
         return np.average([o2_a_intercept, o2_b_intercept]), np.average([o2_a_coef, o2_b_coef])
     except:
         print('Failed to fetch o2 parameters. Giving out the default value ...')
-        return [1.6844264, 0.1679237]
+        return [1, 0]
 
 def get_comb_tags():
     q = f"""SELECT cd.f_desc, tbr.f_value, cd.f_units FROM {_DB_NAME_}.cb_display cd 

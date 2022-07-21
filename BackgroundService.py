@@ -23,6 +23,7 @@ DCS_O2 = RegionalLinearReg(dcs_x, dcs_y)
 
 con = f"mysql+mysqlconnector://{_USER_}:{_PASS_}@{_IP_}/{_DB_NAME_}"
 engine = sqlalchemy.create_engine(con)
+conn = engine.connect()
 
 def logging(text):
     t = time.strftime('%Y-%m-%d %X')
@@ -204,7 +205,6 @@ def bg_safeguard_update():
             LEFT JOIN {_DB_NAME_}.tb_bat_raw raw
             ON conf.f_tag_name = raw.f_address_no 
             WHERE conf.f_description = "{config.DESC_ENABLE_COPT}" 
-            AND conf.f_is_active = 1
             UNION 
             SELECT NOW() AS f_date_rec, f_address_no AS name, f_value FROM {_DB_NAME_}.tb_bat_raw raw
             WHERE f_address_no = "{config.SAFEGUARD_TAG}"
@@ -261,7 +261,9 @@ def bg_safeguard_update():
                                 WHERE f_description = "{config.DESC_ALARM}")
                 ORDER BY ts DESC
                 LIMIT 1"""
-        alarm_current_status = int(pd.read_sql(q, engine).values)
+        alarm_current_status = pd.read_sql(q, engine)
+        if len(alarm_current_status) > 0: alarm_current_status = int(alarm_current_status.values)
+        else: alarm_current_status = 102
         if alarm_current_status != 100:
             # Write back alarm 100 to DCS 
             for table in ['tb_opc_write_copt','tb_opc_write_history_copt']:
@@ -312,18 +314,16 @@ def bg_write_recommendation_to_opc(MAX_BIAS_PERCENTAGE):
     q = f"""SELECT gen.model_id, gen.ts, conf.f_tag_name, conf.f_description, gen.value, gen.bias_value, gen.enable_status, 
             gen.value - gen.bias_value AS current_value
             FROM tb_combustion_model_generation gen
-            LEFT JOIN tb_tags_read_conf conf
+            LEFT JOIN tb_tags_write_conf conf 
             ON gen.tag_name = conf.f_description 
             WHERE gen.ts = (SELECT MAX(ts) FROM tb_combustion_model_generation gen)
-            AND conf.f_category != "Recommendation"
-            AND conf.f_is_active = 1
             GROUP BY conf.f_description """
     Recom = pd.read_sql(q, engine)
     Recom['bias_value'] = Recom['value'] - Recom['current_value']
 
     # Periodical commands
     q = f"SELECT f_default_value FROM tb_combustion_parameters WHERE f_label = 'COMMAND_PERIOD'"
-    COMMAND_PERIOD = pd.read_sql(q, engine).values[0][0]
+    COMMAND_PERIOD = int(pd.read_sql(q, engine).values[0][0])
     print(COMMAND_PERIOD)
 
     ts = Recom['ts'].max()
