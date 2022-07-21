@@ -7,7 +7,7 @@ _UNIT_CODE_ = "RBG1"
 _UNIT_NAME_ = "PLTU Rembang Unit 1"
 _USER_ = "bat_copt"
 _PASS_ = "P@ssw0rd"
-_IP_ = "10.7.1.116:33011" # "35.219.48.62" # 
+_IP_ = "192.168.2.10" # "35.219.48.62" # 
 _LOCAL_IP_ = "0.0.0.0:5002"
 _DB_NAME_ = "db_bat_rmb1"
 
