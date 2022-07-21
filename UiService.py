@@ -45,8 +45,8 @@ def get_status():
     df = pd.read_sql(q, engine).replace(np.nan, 0)
     status = {}
     for k in keys:
-        if k in df['f_address_no'].values: status[k] = df[df['f_address_no'] == k]['f_value'].values[0]
-        elif np.isnan(status[k]): status[k] = 0
+        if k in df['f_address_no'].values: status[k] = int(df[df['f_address_no'] == k]['f_value'].values[0])
+        elif np.isnan(status[k]): status[k] = int(0)
         else: status[k] = 0
     return status[keys[0]], status[keys[1]], status[keys[2]]
 
