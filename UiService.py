@@ -86,11 +86,14 @@ def get_comb_tags():
     o2_intercept, o2_bias = get_o2_converter_parameters()
     df.loc['excess_o2','f_value']  = float(df.loc['excess_o2','f_value']) * o2_intercept + o2_bias
 
-    df['f_value'] = df['f_value'].astype(float).round(2)
-    df['f_value'] = df['f_value'].astype(str) + ' ' + df['f_units']
-    df = df.to_dict()
-    df = df['f_value']
-    return df
+    df['f_value'] = df['f_value'].astype(float).round(2).astype(str)
+    text = []
+    for f in df.index:
+        is_boolean = df.loc[f, 'f_data_type'] == "bool"
+        if is_boolean: text.append(bool(float(df.loc[f, 'f_value'])))
+        else: text.append(df.loc[f, 'f_value'] + " " + df.loc[f, 'f_units'])
+    df['text'] = text
+    return df.to_dict()['text']
 
 def get_parameter():
     q = f"""SELECT f_parameter_id AS 'id', f_label AS 'label', f_default_value AS 'value' FROM {_DB_NAME_}.tb_combustion_parameters"""
