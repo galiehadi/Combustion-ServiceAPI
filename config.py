@@ -1,6 +1,7 @@
 """
 Setting parameter untuk koneksi ke database.
 """
+__version__ = 'v1.5'
 
 _UNIT_CODE_ = "RBG1"
 _UNIT_NAME_ = "PLTU Rembang Unit 1"
