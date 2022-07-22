@@ -485,7 +485,9 @@ def bg_get_ml_recommendation():
             with engine.connect() as conn:
                 res = conn.execute(q)
 
-            response = requests.get(f'http://{_LOCAL_IP_}/bat_combustion/{_UNIT_CODE_}/realtime')
+            url = f'http://{_LOCAL_IP_}/bat_combustion/{_UNIT_CODE_}/realtime'
+            logging(f"Calling COPT on URL: {url}")
+            response = requests.get(url)
 
             q = f"""UPDATE {_DB_NAME_}.tb_bat_raw
                     SET f_value=0,f_date_rec=NOW(),f_updated_at=NOW()
@@ -579,6 +581,7 @@ def bg_ml_runner():
         # TEMPORARY! 
         if (now - LATEST_RECOMMENDATION_TIME) < pd.Timedelta(f'{RECOM_EXEC_INTERVAL}min'):
             # TODO: make a smooth transition recommendation
+            logging(f"Last recommendation was {(now - LATEST_RECOMMENDATION_TIME)} ago. Sending recommendation values to OPC smoothly.")
             # Checking current O2 level
             q = f"""SELECT raw.f_value FROM {_DB_NAME_}.cb_display disp
                     LEFT JOIN {_DB_NAME_}.tb_bat_raw raw
