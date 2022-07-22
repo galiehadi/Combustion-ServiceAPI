@@ -26,7 +26,7 @@ engine = sqlalchemy.create_engine(con)
 conn = engine.connect()
 
 def logging(text):
-    t = time.strftime('%Y-%m-%d %X')
+    t = time.strftime('%Y-%m-%d %X (%z)')
     print(f"[{t}] - {text}")
 
 def bg_update_notification():
