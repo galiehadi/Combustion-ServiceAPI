@@ -72,7 +72,7 @@ def get_o2_converter_parameters():
         return [1, 0]
 
 def get_comb_tags():
-    q = f"""SELECT cd.f_desc, tbr.f_value, cd.f_units FROM {_DB_NAME_}.cb_display cd 
+    q = f"""SELECT cd.f_desc, cd.f_data_type, tbr.f_value, cd.f_units FROM {_DB_NAME_}.cb_display cd 
             LEFT JOIN {_DB_NAME_}.tb_bat_raw tbr 
             ON cd.f_tags = tbr.f_address_no 
             ORDER BY cd.f_desc ASC"""
