@@ -26,7 +26,7 @@ engine = sqlalchemy.create_engine(con)
 conn = engine.connect()
 
 def logging(text):
-    t = time.strftime('%Y-%m-%d %X')
+    t = time.strftime('%Y-%m-%d %X (%z)')
     print(f"[{t}] - {text}")
 
 def bg_update_notification():
@@ -323,7 +323,6 @@ def bg_write_recommendation_to_opc(MAX_BIAS_PERCENTAGE):
     # Periodical commands
     q = f"SELECT f_default_value FROM tb_combustion_parameters WHERE f_label = 'COMMAND_PERIOD'"
     COMMAND_PERIOD = int(pd.read_sql(q, engine).values[0][0])
-    print(COMMAND_PERIOD)
 
     ts = Recom['ts'].max()
     ct = pd.to_datetime(time.ctime())

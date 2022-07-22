@@ -1,6 +1,7 @@
 import pandas as pd
 import numpy as np
 import time, config, traceback, re, os
+from BackgroundService import logging
 from urllib.parse import quote_plus as urlparse
 from pprint import pprint
 from sqlalchemy import create_engine
@@ -68,7 +69,7 @@ def get_o2_converter_parameters():
 
         return np.average([o2_a_intercept, o2_b_intercept]), np.average([o2_a_coef, o2_b_coef])
     except:
-        print('Failed to fetch o2 parameters. Giving out the default value ...')
+        # logging('Failed to fetch o2 parameters. Giving out the default value ...')
         return [1, 0]
 
 def get_comb_tags():
@@ -314,8 +315,8 @@ def post_rule(payload):
         return {'Status':'Success'}
 
     except Exception as E:
-        print(E)
-        print(evaluate)
+        logging(f"Error evaluating a new rule: {evaluate}")
+        logging(f"{E}")
         return {'Status': str(E)}
     
 
