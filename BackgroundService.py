@@ -299,7 +299,6 @@ def bg_write_recommendation_to_opc(MAX_BIAS_PERCENTAGE):
             WHERE f_tag_use = "COPT"
             AND f_is_active = 1 """
     Write_tags = pd.read_sql(q, engine)
-    Write_tags
 
     Enable_status = {}
     for c in [config.DESC_ENABLE_COPT_BT, config.DESC_ENABLE_COPT_SEC, config.DESC_ENABLE_COPT_MOT]:
@@ -543,7 +542,8 @@ def bg_ml_runner():
     if 'DEBUG_MODE' in parameters.index:
         DEBUG_MODE = False if (str(int(parameters['DEBUG_MODE'])).lower() in ['0','false',0]) else True
     
-    logging(f'DEBUG_MODE: {DEBUG_MODE}')
+    logging(f'DEBUG_MODE : {DEBUG_MODE}')
+    logging(f'COPT ENABLE: {bool(ENABLE_COPT)}')
     
     if DEBUG_MODE:
         if ENABLE_COPT:
@@ -558,7 +558,7 @@ def bg_ml_runner():
             q = f"""SELECT MAX(ts) FROM {_DB_NAME_}.tb_combustion_model_generation"""
             df = pd.read_sql(q, engine)
             try: LATEST_RECOMMENDATION_TIME = pd.to_datetime(df.values[0][0])
-            except Exception as e: logging(f"Error on line 241:", str(e)) 
+            except Exception as e: logging(f"Error getting latest recommendation:", str(e)) 
 
             # Return if latest recommendation is under RECOM_EXEC_INTERVAL minute
             now = pd.to_datetime(time.ctime())
@@ -574,7 +574,7 @@ def bg_ml_runner():
         q = f"""SELECT MAX(ts) FROM {_DB_NAME_}.tb_combustion_model_generation"""
         df = pd.read_sql(q, engine)
         try: LATEST_RECOMMENDATION_TIME = pd.to_datetime(df.values[0][0])
-        except Exception as e: logging(f"Error on line 344: {e}") 
+        except Exception as e: logging(f"Error getting latest recommendation: {e}") 
 
         now = pd.to_datetime(time.ctime())
         # TEMPORARY! 
@@ -595,7 +595,7 @@ def bg_ml_runner():
                     WHERE f_category = "Recommendation"
                     AND gen.ts = (SELECT MAX(ts) FROM {_DB_NAME_}.tb_combustion_model_generation tcmg)"""
             Recom = pd.read_sql(q, engine)
-            set_point_oxygen = float(Recom[Recom['f_description'] == 'Excess O2']['value'])
+            set_point_oxygen = float(Recom[Recom['f_description'] == 'Excess Oxygen Sensor']['value'])
             if (abs(set_point_oxygen - current_oxygen) < config.OXYGEN_STEADY_STATE_LEVEL): 
                 logging(f'Oxygen is in steady state level ({current_oxygen}).')
                 return {'message': 'Oxygen is in steady state level.'}
@@ -606,6 +606,7 @@ def bg_ml_runner():
         
         else:
             # Calling ML Recommendations to the latest recommendation
+            logging(f"Last recommendation was {(now - LATEST_RECOMMENDATION_TIME)} ago. Generating new ")
             ML = bg_get_ml_recommendation()
 
             if type(ML) is not dict: 
