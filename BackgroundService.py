@@ -468,6 +468,7 @@ def bg_get_ml_model_status():
 def bg_get_ml_recommendation():
     try:
         now = pd.to_datetime(time.ctime())
+        logging('Running bg_get_ml_recommendation')
 
         # Calling ML Recommendations to the latest recommendation
         # TODO: Set latest COPT call based on timestamp
@@ -611,19 +612,21 @@ def bg_ml_runner():
             logging(f"Last recommendation was {(now - LATEST_RECOMMENDATION_TIME)} ago. Generating new ")
             ML = bg_get_ml_recommendation()
 
-            if type(ML) is not dict: 
+            if type(ML) is dict: 
                 if 'model_status' not in ML.keys():
                     try:
                         ML['model_status'] = int(bg_get_ml_model_status())
                     except:
                         return {'message':'Error on ML response. Columns "model_status" not found.'}
 
-            if ML['model_status'] == 1:
-                try:
-                    bg_write_recommendation_to_opc(MAX_BIAS_PERCENTAGE)
-                except Exception as e:
-                    return {'message': str(e)}
-                return {'message':'Done!'}
+                elif ML['model_status'] == 1:
+                    try:
+                        bg_write_recommendation_to_opc(MAX_BIAS_PERCENTAGE)
+                    except Exception as e:
+                        return {'message': str(e)}
+                    return {'message':'Done!'}
+            else:
+                return {'message': f"Error! Message: {ML}"}
 
 if _LOCAL_MODE_:
     k = bg_ml_runner()
