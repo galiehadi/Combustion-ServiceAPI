@@ -6,9 +6,10 @@ from numpy import asanyarray
 from UiService import *
 from BackgroundService import *
 import traceback
+import logging as systemlog
 
-# log = logging.getLogger('werkzeug')
-# log.setLevel(logging.ERROR)
+log = systemlog.getLogger('werkzeug')
+log.setLevel(systemlog.ERROR)
 app = Flask(__name__)
 cors = CORS(app, supports_credentials=True)
 debug_mode = False

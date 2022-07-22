@@ -238,7 +238,7 @@ def bg_safeguard_update():
         opc_write = [[o2_recom_tag, ts, o2_bias]]
         opc_write = pd.DataFrame(opc_write, columns=['tag_name','ts','value'])
         
-        # opc_write.to_sql('tb_opc_write_copt', con, if_exists='append', index=False)
+        opc_write.to_sql('tb_opc_write_copt', con, if_exists='append', index=False)
         opc_write.to_sql('tb_opc_write_history_copt', engine, if_exists='append', index=False)
 
         # Append alarm history
@@ -450,7 +450,7 @@ def bg_write_recommendation_to_opc1(MAX_BIAS_PERCENTAGE):
             tags = Enable_status[C]['tag_lists']
             opc_write = opc_write.drop(index = opc_write[opc_write['tag_name'].isin(tags)].index)
     
-    # opc_write.to_sql('tb_opc_write_copt', engine, if_exists='append', index=False)
+    opc_write.to_sql('tb_opc_write_copt', engine, if_exists='append', index=False)
     opc_write.to_sql('tb_opc_write_history_copt', engine, if_exists='append', index=False)
     logging(f'Write to OPC: {opc_write}')
     return 'Done!'
@@ -502,6 +502,7 @@ def bg_get_ml_recommendation():
             return ret
         elif (now - copt_is_calling_timestamp) > pd.Timedelta('60sec'):
             # Set back COPT_is_calling to 0 if last update > 60 sec ago.
+            logging("Set back COPT_is_calling to 0 cause a timeout.")
             q = f"""UPDATE {_DB_NAME_}.tb_bat_raw
                     SET f_value=0,f_date_rec=NOW(),f_updated_at=NOW()
                     WHERE f_address_no='{config.TAG_COPT_ISCALLING}' """
