@@ -238,7 +238,7 @@ def bg_safeguard_update():
         opc_write = [[o2_recom_tag, ts, o2_bias]]
         opc_write = pd.DataFrame(opc_write, columns=['tag_name','ts','value'])
         
-        # opc_write.to_sql('tb_opc_write_copt', con, if_exists='append', index=False)
+        opc_write.to_sql('tb_opc_write_copt', con, if_exists='append', index=False)
         opc_write.to_sql('tb_opc_write_history_copt', engine, if_exists='append', index=False)
 
         # Append alarm history
@@ -450,7 +450,7 @@ def bg_write_recommendation_to_opc1(MAX_BIAS_PERCENTAGE):
             tags = Enable_status[C]['tag_lists']
             opc_write = opc_write.drop(index = opc_write[opc_write['tag_name'].isin(tags)].index)
     
-    # opc_write.to_sql('tb_opc_write_copt', engine, if_exists='append', index=False)
+    opc_write.to_sql('tb_opc_write_copt', engine, if_exists='append', index=False)
     opc_write.to_sql('tb_opc_write_history_copt', engine, if_exists='append', index=False)
     logging(f'Write to OPC: {opc_write}')
     return 'Done!'
