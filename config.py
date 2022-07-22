@@ -3,7 +3,7 @@ Setting parameter untuk koneksi ke database.
 """
 __version__ = 'v1.5'
 
-_UNIT_CODE_ = "RBG1"
+_UNIT_CODE_ = "RBG2"
 _UNIT_NAME_ = "PLTU Rembang Unit 1"
 _USER_ = "bat_copt"
 _PASS_ = "P@ssw0rd"

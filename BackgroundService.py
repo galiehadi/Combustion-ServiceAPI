@@ -502,6 +502,7 @@ def bg_get_ml_recommendation():
             return ret
         elif (now - copt_is_calling_timestamp) > pd.Timedelta('60sec'):
             # Set back COPT_is_calling to 0 if last update > 60 sec ago.
+            logging("Set back COPT_is_calling to 0 cause a timeout.")
             q = f"""UPDATE {_DB_NAME_}.tb_bat_raw
                     SET f_value=0,f_date_rec=NOW(),f_updated_at=NOW()
                     WHERE f_address_no='{config.TAG_COPT_ISCALLING}' """
