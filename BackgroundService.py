@@ -183,9 +183,20 @@ def bg_combustion_watchdog_check():
     t0 = time.time()
     q = f"""SELECT f_value FROM tb_bat_raw tbr 
             WHERE f_address_no = "{config.WATCHDOG_TAG}" """
-    Watchdog_status = int(pd.read_sql(q, engine).values)
+    q = f"""SELECT conf.f_description, raw.f_value FROM tb_bat_raw raw
+            LEFT JOIN tb_tags_read_conf conf
+            ON conf.f_tag_name = raw.f_address_no 
+            WHERE conf.f_description = "COMBUSTION ENABLE"
+            UNION 
+            SELECT raw.f_address_no, raw.f_value FROM tb_bat_raw raw
+            WHERE f_address_no = "WatchdogStatus" """
+    DF = pd.read_sql(q, engine)
+    DF = DF.set_index('f_description')['f_value']
+    Watchdog_status = int(DF[config.WATCHDOG_TAG])
+    COPT_status = int(DF[config.DESC_ENABLE_COPT])
+    
     Watchdog_safe = Watchdog_status == 1
-    if not Watchdog_safe:
+    if not Watchdog_safe and COPT_status == 1:
         logging('Watchdog are disconnected. Turning off COPT ...')
 
         q = f"""UPDATE db_bat_rmb1.tb_bat_raw
