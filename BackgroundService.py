@@ -74,8 +74,7 @@ def bg_update_notification():
                 VALUES ("{tag_name}", {status_now}, "{message}", "{timestamp_now}") """
         print(message)
         try:
-            with engine.connect() as conn:
-                conn.execute(q)
+            conn.execute(q)
         except: pass
 
     return
@@ -180,10 +179,37 @@ def bg_sootblow_safeguard_check():
     }
     return ret
 
+def bg_combustion_watchdog_check():
+    t0 = time.time()
+    q = f"""SELECT f_value FROM tb_bat_raw tbr 
+            WHERE f_address_no = "{config.WATCHDOG_TAG}" """
+    Watchdog_status = int(pd.read_sql(q, engine).values)
+    Watchdog_safe = Watchdog_status == 1
+    if not Watchdog_safe:
+        logging('Watchdog are disconnected. Turning off COPT ...')
+
+        q = f"""UPDATE db_bat_rmb1.tb_bat_raw
+                SET f_value=0,f_updated_at=NOW(),f_date_rec=NOW()
+                WHERE f_address_no=(SELECT f_tag_name FROM tb_tags_read_conf ttrc 
+                WHERE f_description = "{config.DESC_ENABLE_COPT}");"""
+        conn.execute(q)
+
+        Alarm = [[pd.to_datetime('now'), 'Watchdog','WatchdogStatus == 1', Watchdog_status, 0]]
+        Alarm = pd.DataFrame(Alarm, columns=["f_timestamp", "f_desc", "f_set_value", "f_actual_value", "f_rule_header"])
+        Alarm.to_sql('tb_combustion_alarm_history', engine, if_exists='append', index=False)
+    
+    ret = {
+        'Watchdog Status': Watchdog_status,
+        'Execution time': str(round(time.time() - t0,3)) + ' sec'
+    }
+    return ret
+
+
 # TODO: Reconstruct safeguard updates
 def bg_safeguard_update():
     S_COPT = bg_combustion_safeguard_check()
     S_SOPT = bg_sootblow_safeguard_check()
+    WD_STATUS = bg_combustion_watchdog_check()
     copt_safeguard_status = S_COPT['Safeguard Status']
     sopt_safeguard_status = S_SOPT['Safeguard Status']
 
@@ -192,14 +218,14 @@ def bg_safeguard_update():
     # Always update COPT safeguard status
     q = f"""UPDATE {_DB_NAME_}.tb_bat_raw SET f_date_rec=NOW(), f_value={1 if copt_safeguard_status else 0}, f_updated_at=NOW()
             WHERE f_address_no = "{config.SAFEGUARD_TAG}" """
-    with engine.connect() as conn:
-        res = conn.execute(q)
+    
+    res = conn.execute(q)
         
     # Always update SOPT safeguard status
     q = f"""UPDATE {_DB_NAME_}.tb_bat_raw SET f_date_rec=NOW(), f_value={1 if sopt_safeguard_status else 0}, f_updated_at=NOW()
             WHERE f_address_no = "{config.SAFEGUARD_SOPT_TAG}" """
-    with engine.connect() as conn:
-        res = conn.execute(q)
+    
+    res = conn.execute(q)
 
     # Get current condition
     q = f"""SELECT NOW() AS f_date_rec, f_description as name, raw.f_value FROM {_DB_NAME_}.tb_tags_read_conf conf
@@ -252,8 +278,8 @@ def bg_safeguard_update():
             q = f"""INSERT IGNORE INTO {_DB_NAME_}.{table}
                     SELECT f_tag_name AS tag_name, NOW() AS ts, 102 AS value FROM {_DB_NAME_}.tb_tags_write_conf ttwc 
                     WHERE f_description = "{config.DESC_ALARM}" """
-            with engine.connect() as conn:
-                res = conn.execute(q)
+            
+            res = conn.execute(q)
     
     if copt_safeguard_status:
         # Checking last alarm
@@ -271,8 +297,7 @@ def bg_safeguard_update():
                 q = f"""INSERT IGNORE INTO {_DB_NAME_}.{table}
                         SELECT f_tag_name AS tag_name, NOW() AS ts, 100 AS value FROM {_DB_NAME_}.tb_tags_write_conf ttwc 
                         WHERE f_description = "{config.DESC_ALARM}" """
-                with engine.connect() as conn:
-                    res = conn.execute(q)
+                res = conn.execute(q)
             logging(f'Write to OPC: {config.DESC_ALARM}: 102 changed to 100')
     return S_COPT
 
@@ -486,8 +511,7 @@ def bg_get_ml_recommendation():
             # q = f"""REPLACE INTO {_DB_NAME_}.tb_bat_raw
             #         (f_value, f_date_rec, f_updated_at, f_address_no) VALUES
             #         (1, NOW(), NOW(), "{config.TAG_COPT_ISCALLING}") """
-            with engine.connect() as conn:
-                res = conn.execute(q)
+            res = conn.execute(q)
 
             url = f'http://{_LOCAL_IP_}/bat_combustion/{_UNIT_CODE_}/realtime'
             logging(f"Calling COPT on URL: {url}")
@@ -499,8 +523,7 @@ def bg_get_ml_recommendation():
             # q = f"""REPLACE INTO {_DB_NAME_}.tb_bat_raw
             #         (f_value, f_date_rec, f_updated_at, f_address_no) VALUES
             #         (1, NOW(), NOW(), "{config.TAG_COPT_ISCALLING}") """
-            with engine.connect() as conn:
-                res = conn.execute(q)
+            res = conn.execute(q)
             
             ret = response.json()
             return ret
@@ -510,8 +533,7 @@ def bg_get_ml_recommendation():
             q = f"""UPDATE {_DB_NAME_}.tb_bat_raw
                     SET f_value=0,f_date_rec=NOW(),f_updated_at=NOW()
                     WHERE f_address_no='{config.TAG_COPT_ISCALLING}' """
-            with engine.connect() as conn:
-                res = conn.execute(q)
+            res = conn.execute(q)
     except Exception as e:
         logging(f'Machine learning prediction error: {traceback.format_exc()}')
         return str(e)
@@ -556,8 +578,7 @@ def bg_ml_runner():
             q = f"""UPDATE {_DB_NAME_}.tb_combustion_parameters
                     SET f_default_value=0
                     WHERE f_label="DEBUG_MODE";"""
-            with engine.connect() as conn:
-                conn.execute(q)
+            conn.execute(q)
         else:
             # Get latest recommendations time
             q = f"""SELECT MAX(ts) FROM {_DB_NAME_}.tb_combustion_model_generation"""
