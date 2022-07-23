@@ -318,6 +318,7 @@ def bg_write_recommendation_to_opc(MAX_BIAS_PERCENTAGE):
             WHERE gen.ts = (SELECT MAX(ts) FROM tb_combustion_model_generation gen)
             GROUP BY conf.f_description """
     Recom = pd.read_sql(q, engine)
+    Recom = Recom.dropna(subset=['f_description'])
     Recom['bias_value'] = Recom['value'] - Recom['current_value']
 
     # Periodical commands
