@@ -1,3 +1,4 @@
+from lib2to3.pgen2.token import COMMA
 from operator import index
 import pandas as pd
 import numpy as np
@@ -328,7 +329,8 @@ def bg_write_recommendation_to_opc(MAX_BIAS_PERCENTAGE):
     ts = Recom['ts'].max()
     ct = pd.to_datetime(time.ctime())
     recom_ke = (ct - ts).components.minutes + 1
-    if recom_ke > COMMAND_PERIOD: return 'Waiting'
+    if recom_ke > COMMAND_PERIOD: 
+        recom_ke = COMMAND_PERIOD
     Recom['bias_value'] = Recom['bias_value'] * recom_ke / COMMAND_PERIOD
     
     o2_idx = None
