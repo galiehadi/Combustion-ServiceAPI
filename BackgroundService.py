@@ -208,6 +208,16 @@ def bg_combustion_watchdog_check():
         Alarm = [[pd.to_datetime('now'), 'Watchdog','WatchdogStatus == 1', Watchdog_status, 0]]
         Alarm = pd.DataFrame(Alarm, columns=["f_timestamp", "f_desc", "f_set_value", "f_actual_value", "f_rule_header"])
         Alarm.to_sql('tb_combustion_alarm_history', engine, if_exists='append', index=False)
+
+        q = f"""SELECT f_tag_name FROM tb_tags_write_conf
+                WHERE f_description = "Combustion Alarm" """
+        alarm_tag = pd.read_sql(q, conn).values[0][0]
+
+        opc_write = [[alarm_tag, pd.to_datetime('now'), 101]]
+        opc_write = pd.DataFrame(opc_write, columns=['tag_name','ts','value'])
+        
+        opc_write.to_sql('tb_opc_write_copt', con, if_exists='append', index=False)
+        opc_write.to_sql('tb_opc_write_history_copt', engine, if_exists='append', index=False)
     
     ret = {
         'Watchdog Status': Watchdog_status,
@@ -519,9 +529,6 @@ def bg_get_ml_recommendation():
             q = f"""UPDATE {_DB_NAME_}.tb_bat_raw
                     SET f_value=1,f_date_rec=NOW(),f_updated_at=NOW()
                     WHERE f_address_no='{config.TAG_COPT_ISCALLING}' """
-            # q = f"""REPLACE INTO {_DB_NAME_}.tb_bat_raw
-            #         (f_value, f_date_rec, f_updated_at, f_address_no) VALUES
-            #         (1, NOW(), NOW(), "{config.TAG_COPT_ISCALLING}") """
             res = conn.execute(q)
 
             url = f'http://{_LOCAL_IP_}/bat_combustion/{_UNIT_CODE_}/realtime'
@@ -531,10 +538,9 @@ def bg_get_ml_recommendation():
             q = f"""UPDATE {_DB_NAME_}.tb_bat_raw
                     SET f_value=0,f_date_rec=NOW(),f_updated_at=NOW()
                     WHERE f_address_no='{config.TAG_COPT_ISCALLING}' """
-            # q = f"""REPLACE INTO {_DB_NAME_}.tb_bat_raw
-            #         (f_value, f_date_rec, f_updated_at, f_address_no) VALUES
-            #         (1, NOW(), NOW(), "{config.TAG_COPT_ISCALLING}") """
             res = conn.execute(q)
+
+            logging(f"Received response: {response.json()}")
             
             ret = response.json()
             return ret
@@ -580,12 +586,13 @@ def bg_ml_runner():
     if 'DEBUG_MODE' in parameters.index:
         DEBUG_MODE = False if (str(int(parameters['DEBUG_MODE'])).lower() in ['0','false',0]) else True
     
-    logging(f'DEBUG_MODE : {DEBUG_MODE}')
-    logging(f'COPT ENABLE: {bool(ENABLE_COPT)}')
+    # logging(f'DEBUG_MODE : {DEBUG_MODE}')
+    # logging(f'COPT ENABLE: {bool(ENABLE_COPT)}')
     
     if DEBUG_MODE:
         if ENABLE_COPT:
             # Change DEBUG_MODE to False
+            logging(f"DEBUG_MODE is on, and COPT is on. Turning off DEBUG_MODE ...")
             q = f"""UPDATE {_DB_NAME_}.tb_combustion_parameters
                     SET f_default_value=0
                     WHERE f_label="DEBUG_MODE";"""
