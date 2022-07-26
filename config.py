@@ -31,15 +31,9 @@ PARAMETER_SET_POINT = 'value'
 
 PARAMETER_WRITE = {
     'All Wind': PARAMETER_BIAS,
-    'Burner Tilt Position 1L': PARAMETER_BIAS,
-    'Burner Tilt Position 1R': PARAMETER_BIAS,
-    'Burner Tilt Position 2L': PARAMETER_BIAS,
-    'Burner Tilt Position 2R': PARAMETER_BIAS,
-    'Burner Tilt Position 3L': PARAMETER_BIAS,
-    'Burner Tilt Position 3R': PARAMETER_BIAS,
-    'Burner Tilt Position 4L': PARAMETER_BIAS,
-    'Burner Tilt Position 4R': PARAMETER_BIAS,
-    'Excess Oxygen Sensor': PARAMETER_SET_POINT,
+    'Burner Tilt Position Lower': PARAMETER_BIAS,
+    'Burner Tilt Position Upper': PARAMETER_BIAS,
+    'Excess Oxygen Sensor': PARAMETER_BIAS,
     'Mill A Outlet Temperature': PARAMETER_SET_POINT,
     'Mill B Outlet Temperature': PARAMETER_SET_POINT,
     'Mill C Outlet Temperature': PARAMETER_SET_POINT,
