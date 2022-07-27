@@ -617,6 +617,8 @@ def bg_ml_runner():
             
             # Calling ML Recommendations to the latest recommendation
             val = bg_get_ml_recommendation()
+            bg_write_recommendation_to_opc(MAX_BIAS_PERCENTAGE)
+            
             return {'message': f"Value: {val}"}
 
     elif ENABLE_COPT:
