@@ -22,7 +22,7 @@ DCS_O2 = RegionalLinearReg(dcs_x, dcs_y)
 
 con = f"mysql+mysqlconnector://{_USER_}:{_PASS_}@{_IP_}/{_DB_NAME_}"
 engine = sqlalchemy.create_engine(con)
-conn = engine.connect()
+# conn = engine.connect()
 
 def logging(text):
     t = time.strftime('%Y-%m-%d %X (%z)')
@@ -72,7 +72,7 @@ def bg_update_notification():
                 VALUES ("{tag_name}", {status_now}, "{message}", "{timestamp_now}") """
         print(message)
         try:
-            conn.execute(q)
+            with engine.connect() as conn: res = conn.execute(q)
         except Exception as E: 
             logging(f"Failed to execute INSERT: {E}")
             pass
@@ -203,7 +203,7 @@ def bg_combustion_watchdog_check():
                 SET f_value=0,f_updated_at=NOW(),f_date_rec=NOW()
                 WHERE f_address_no=(SELECT f_tag_name FROM tb_tags_read_conf ttrc 
                 WHERE f_description = "{config.DESC_ENABLE_COPT}");"""
-        conn.execute(q)
+        with engine.connect() as conn: res = conn.execute(q)
 
         Alarm = [[pd.to_datetime('now'), 'Watchdog','WatchdogStatus == 1', Watchdog_status, 0]]
         Alarm = pd.DataFrame(Alarm, columns=["f_timestamp", "f_desc", "f_set_value", "f_actual_value", "f_rule_header"])
@@ -241,7 +241,7 @@ def bg_safeguard_update():
             WHERE f_address_no = "{config.SAFEGUARD_TAG}" """
     
     try:
-        res = conn.execute(q)
+        with engine.connect() as conn: res = conn.execute(q)
     except Exception as E:
         logging(f"Failed to update COPT SAFEGUARD: {E}")
         
@@ -250,7 +250,7 @@ def bg_safeguard_update():
             WHERE f_address_no = "{config.SAFEGUARD_SOPT_TAG}" """
     
     try:
-        res = conn.execute(q)
+        with engine.connect() as conn: res = conn.execute(q)
     except Exception as E:
         logging(f"Failed to update SOPT SAFEGUARD: {E}")
 
@@ -306,7 +306,7 @@ def bg_safeguard_update():
                     SELECT f_tag_name AS tag_name, NOW() AS ts, 102 AS value FROM {_DB_NAME_}.tb_tags_write_conf ttwc 
                     WHERE f_description = "{config.DESC_ALARM}" """
             
-            res = conn.execute(q)
+            with engine.connect() as conn: res = conn.execute(q)
     
     if copt_safeguard_status:
         # Checking last alarm
@@ -324,7 +324,7 @@ def bg_safeguard_update():
                 q = f"""INSERT IGNORE INTO {_DB_NAME_}.{table}
                         SELECT f_tag_name AS tag_name, NOW() AS ts, 100 AS value FROM {_DB_NAME_}.tb_tags_write_conf ttwc 
                         WHERE f_description = "{config.DESC_ALARM}" """
-                res = conn.execute(q)
+                with engine.connect() as conn: res = conn.execute(q)
             logging(f'Write to OPC: {config.DESC_ALARM}: 102 changed to 100')
     return S_COPT
 
@@ -535,7 +535,7 @@ def bg_get_ml_recommendation():
             q = f"""UPDATE {_DB_NAME_}.tb_bat_raw
                     SET f_value=1,f_date_rec=NOW(),f_updated_at=NOW()
                     WHERE f_address_no='{config.TAG_COPT_ISCALLING}' """
-            res = conn.execute(q)
+            with engine.connect() as conn: res = conn.execute(q)
 
             url = f'http://{_LOCAL_IP_}/bat_combustion/{_UNIT_CODE_}/realtime'
             logging(f"Calling COPT on URL: {url}")
@@ -544,7 +544,7 @@ def bg_get_ml_recommendation():
             q = f"""UPDATE {_DB_NAME_}.tb_bat_raw
                     SET f_value=0,f_date_rec=NOW(),f_updated_at=NOW()
                     WHERE f_address_no='{config.TAG_COPT_ISCALLING}' """
-            res = conn.execute(q)
+            with engine.connect() as conn: res = conn.execute(q)
 
             logging(f"Received response: {response.json()}")
             
@@ -556,7 +556,7 @@ def bg_get_ml_recommendation():
             q = f"""UPDATE {_DB_NAME_}.tb_bat_raw
                     SET f_value=0,f_date_rec=NOW(),f_updated_at=NOW()
                     WHERE f_address_no='{config.TAG_COPT_ISCALLING}' """
-            res = conn.execute(q)
+            with engine.connect() as conn: res = conn.execute(q)
     except Exception as e:
         logging(f'Machine learning prediction error: {traceback.format_exc()}')
         return str(e)
@@ -602,7 +602,7 @@ def bg_ml_runner():
             q = f"""UPDATE {_DB_NAME_}.tb_combustion_parameters
                     SET f_default_value=0
                     WHERE f_label="DEBUG_MODE";"""
-            conn.execute(q)
+            with engine.connect() as conn: res = conn.execute(q)
         else:
             # Get latest recommendations time
             q = f"""SELECT MAX(ts) FROM {_DB_NAME_}.tb_combustion_model_generation"""
