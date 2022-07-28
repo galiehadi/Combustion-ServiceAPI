@@ -385,14 +385,11 @@ def bg_write_recommendation_to_opc(MAX_BIAS_PERCENTAGE):
         recom_ke = COMMAND_PERIOD
     Recom['bias_value'] = Recom['bias_value'] * recom_ke / COMMAND_PERIOD
     
-    o2_idx = None
     # Limit recommendation to MAX_BIAS_PERCENTAGE %
     for i in Recom.index:
         mxv = MAX_BIAS_PERCENTAGE * abs(Recom.loc[i, 'current_value']) / 100
         Recom.loc[i, 'bias_value'] = max(-mxv, Recom.loc[i, 'bias_value'])
         Recom.loc[i, 'bias_value'] = min(mxv, Recom.loc[i, 'bias_value'])
-        if 'Oxygen' in Recom.loc[i, 'f_description']: o2_idx = i
-        elif 'O2' in Recom.loc[i, 'f_description']: o2_idx = i
     Recom['value'] = Recom['current_value'] + Recom['bias_value']
 
     # # Calculate O2 Set Point based on GrossMW from DCS
@@ -403,11 +400,23 @@ def bg_write_recommendation_to_opc(MAX_BIAS_PERCENTAGE):
     # dcs_mw = pd.read_sql(q, engine).values[0][0]
     # dcs_o2 = DCS_O2.predict(dcs_mw)
 
+    # Change to tag
+    q = f"""SELECT f_value FROM tb_tags_read_conf conf
+        LEFT JOIN tb_bat_raw raw
+        ON conf.f_tag_name = raw.f_address_no
+        WHERE f_description = "DCS O2 SET POINT" """
+    df = pd.read_sql(q, engine)
+    dcs_o2 = df.values[0][0]
+
     opc_write = Recom.merge(Write_tags, how='left', left_on='f_description', right_on='f_description')
     opc_write = opc_write[['f_tag_name_y', 'f_description','ts',config.PARAMETER_BIAS, config.PARAMETER_SET_POINT]].dropna()
     opc_write['value_to_send'] = 0
+
+    o2_idx = None
     for i in opc_write.index:
         desc = opc_write.loc[i, 'f_description']
+        if 'Oxygen' in opc_write.loc[i, 'f_description']: o2_idx = i
+        elif 'O2' in opc_write.loc[i, 'f_description']: o2_idx = i
         if desc in config.PARAMETER_WRITE.keys():
             opc_write.loc[i, 'value_to_send'] = opc_write.loc[i, config.PARAMETER_SET_POINT] if config.PARAMETER_WRITE[desc] == config.PARAMETER_SET_POINT else opc_write.loc[i, config.PARAMETER_BIAS]
     opc_write = opc_write[['f_tag_name_y', 'ts', 'value_to_send']]
@@ -415,8 +424,8 @@ def bg_write_recommendation_to_opc(MAX_BIAS_PERCENTAGE):
     opc_write.columns = ['tag_name','ts','value']
     opc_write['ts'] = pd.to_datetime(time.ctime())
 
-    # if o2_idx is not None:
-    #     opc_write.loc[o2_idx, 'value'] = opc_write.loc[o2_idx, 'value'] - dcs_o2
+    if o2_idx is not None:
+        opc_write.loc[o2_idx, 'value'] = opc_write.loc[o2_idx, 'value'] - dcs_o2
 
     # # Remove tags that disabled partially
     # for C in Enable_status.keys():
