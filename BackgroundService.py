@@ -425,7 +425,7 @@ def bg_write_recommendation_to_opc(MAX_BIAS_PERCENTAGE):
     opc_write['ts'] = pd.to_datetime(time.ctime())
 
     if o2_idx is not None:
-        opc_write.loc[o2_idx, 'value'] = opc_write.loc[o2_idx, 'value'] - dcs_o2
+        opc_write.loc[o2_idx, 'value'] = dcs_o2 - opc_write.loc[o2_idx, 'value']
 
     # # Remove tags that disabled partially
     # for C in Enable_status.keys():
@@ -619,9 +619,6 @@ def bg_ml_runner():
             try: LATEST_RECOMMENDATION_TIME = pd.to_datetime(df.values[0][0])
             except Exception as e: logging(f"Error getting latest recommendation:", str(e)) 
 
-            # Sending values to OPC even with COPT turned off
-            bg_write_recommendation_to_opc(MAX_BIAS_PERCENTAGE)
-
             # Return if latest recommendation is under RECOM_EXEC_INTERVAL minute
             now = pd.to_datetime(time.ctime())
             if (now - LATEST_RECOMMENDATION_TIME) < pd.Timedelta(f'{RECOM_EXEC_INTERVAL}min'):
@@ -629,6 +626,9 @@ def bg_ml_runner():
             
             # Calling ML Recommendations to the latest recommendation
             val = bg_get_ml_recommendation()
+
+            # Sending values to OPC even with COPT turned off
+            bg_write_recommendation_to_opc(MAX_BIAS_PERCENTAGE)
 
             return {'message': f"Value: {val}"}
 
