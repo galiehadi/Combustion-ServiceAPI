@@ -561,11 +561,13 @@ def bg_get_ml_recommendation():
 
             response_json = response.json()
             if 'message' in response_json.keys(): logging(f"Received response: {response_json['message']}")
-            else: logging(f"Received response: {response.json()}")
+            else: 
+                logging(f"Received response: {response.json()}")
+                response_json['message'] = ''
             
             res = response_json
             ret['status'] = 'Success'
-            ret['message'] = res
+            ret['message'] = res['message']
             return ret
         elif (now - copt_is_calling_timestamp) > pd.Timedelta('60sec'):
             # Set back COPT_is_calling to 0 if last update > 60 sec ago.
