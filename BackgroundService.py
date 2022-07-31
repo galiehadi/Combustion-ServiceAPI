@@ -530,6 +530,10 @@ def bg_get_ml_model_status():
     return 'Failed'
 
 def bg_get_ml_recommendation():
+    ret = {
+        'status': "Failed",
+        'message': '',
+    }
     try:
         now = pd.to_datetime(time.ctime())
         logging('Running bg_get_ml_recommendation')
@@ -557,18 +561,25 @@ def bg_get_ml_recommendation():
 
             logging(f"Received response: {response.json()}")
             
-            ret = response.json()
+            res = response.json()
+            ret['status'] = 'Success'
+            ret['message'] = res
             return ret
         elif (now - copt_is_calling_timestamp) > pd.Timedelta('60sec'):
             # Set back COPT_is_calling to 0 if last update > 60 sec ago.
-            logging("Set back COPT_is_calling to 0 cause a timeout.")
+            message = "Set back COPT_is_calling to 0 cause a timeout."
+            logging(message)
             q = f"""UPDATE {_DB_NAME_}.tb_bat_raw
                     SET f_value=0,f_date_rec=NOW(),f_updated_at=NOW()
                     WHERE f_address_no='{config.TAG_COPT_ISCALLING}' """
             with engine.connect() as conn: res = conn.execute(q)
+            ret['status'] = 'Waiting'
+            ret['message'] = message
     except Exception as e:
-        logging(f'Machine learning prediction error: {traceback.format_exc()}')
-        return str(e)
+        message = f'Machine learning prediction error: {traceback.format_exc()}'
+        logging(message)
+        ret['message'] = message
+        return ret
 
 def bg_ml_runner():
     ENABLE_COPT = 0
@@ -627,8 +638,9 @@ def bg_ml_runner():
             # Calling ML Recommendations to the latest recommendation
             val = bg_get_ml_recommendation()
 
-            # Sending values to OPC even with COPT turned off
-            bg_write_recommendation_to_opc(MAX_BIAS_PERCENTAGE)
+            if val['status'] == 'Success':
+                # Sending values to OPC even with COPT turned off
+                bg_write_recommendation_to_opc(MAX_BIAS_PERCENTAGE)
 
             return {'message': f"Value: {val}"}
 
