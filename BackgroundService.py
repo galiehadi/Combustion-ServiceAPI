@@ -559,9 +559,11 @@ def bg_get_ml_recommendation():
                     WHERE f_address_no='{config.TAG_COPT_ISCALLING}' """
             with engine.connect() as conn: res = conn.execute(q)
 
-            logging(f"Received response: {response.json()}")
+            response_json = response.json()
+            if 'message' in response_json.keys(): logging(f"Received response: {response_json['message']}")
+            else: logging(f"Received response: {response.json()}")
             
-            res = response.json()
+            res = response_json
             ret['status'] = 'Success'
             ret['message'] = res
             return ret
@@ -639,8 +641,9 @@ def bg_ml_runner():
             val = bg_get_ml_recommendation()
 
             if val['status'] == 'Success':
-                # Sending values to OPC even with COPT turned off
-                bg_write_recommendation_to_opc(MAX_BIAS_PERCENTAGE)
+                if not str(val['message']).startswith('Code 104'):
+                    # Sending values to OPC even with COPT turned off
+                    bg_write_recommendation_to_opc(MAX_BIAS_PERCENTAGE)
 
             return {'message': f"Value: {val}"}
 
