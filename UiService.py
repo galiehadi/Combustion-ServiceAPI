@@ -223,7 +223,7 @@ def get_tags_rule():
             WHERE f_tag_use IN ("COPT", "SOPT+COPT", "COPT+SOPT")
             AND f_is_active != 0"""
     df = pd.read_sql(q, engine)
-    df['tagDescription'] = [f.strip() for f in df['tagDescription']]
+    df['tagDescription'] = [f.strip() for f in df['tagDescription'].astype(str)]
     df['tagDescription'] = df['tagSensor'] + ' -- ' + df['tagDescription']
     df_dict = df.to_dict('records')
     return df_dict
