@@ -205,7 +205,13 @@ def safeguard_check():
     }
 
     try:
-        data['object'] = bg_safeguard_update()
+        ret = bg_safeguard_update()
+        data['object'] = {
+            'ruleLogic': ret['Safeguard Text'],
+            'ruleValue': ret['Safeguard Status'],
+            'detailRule': ret['Individual Safeguard'],
+            'label': 'Safeguard'
+        }
         data['message'] = 'Success'
         
         # sisipan

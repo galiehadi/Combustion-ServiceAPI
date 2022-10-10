@@ -107,12 +107,17 @@ def bg_combustion_safeguard_check():
     Safeguard_status = True
     Safeguard_text = ''
     Alarms = []
+    Individual_safeguard_values = []
+    
     for i in sg.index:
         _, tagname, description, bracketOpen, value, bracketClose = sg.iloc[i]
         bracketClose = bracketClose.replace('==','=').replace("=","==")
         Safeguard_text += f"{bracketOpen}{value}{bracketClose} "
 
         bracketClose_ = bracketClose.replace('AND','').replace('OR','')
+        setValue = bracketClose_
+        while setValue.count(')') > setValue.count('('):
+            setValue = setValue[::-1].replace(')','',1)[::-1]
         individualRule = f"{bracketOpen}{value}{bracketClose_} ".lower()
         individualAlarm = {
             'f_timestamp': ts,
@@ -123,6 +128,15 @@ def bg_combustion_safeguard_check():
         }
         try: 
             if not eval(individualRule): Alarms.append(individualAlarm)
+            
+            individualValues = {
+                'sequence': i,
+                'setValue': setValue, 
+                'actualValue': value,
+                'tagDescription': description.strip(),
+                'status': eval(individualRule)
+            }
+            Individual_safeguard_values.append(individualValues)
         except:
             Alarms.append(individualAlarm)
 
@@ -132,7 +146,9 @@ def bg_combustion_safeguard_check():
     ret = {
         'Safeguard Status': Safeguard_status,
         'Execution time': str(round(time.time() - t0,3)) + ' sec',
-        'Individual Alarm': Alarms
+        'Individual Alarm': Alarms,
+        'Individual Safeguard': Individual_safeguard_values,
+        'Safeguard Text': Safeguard_text
     }
     return ret
 
@@ -392,21 +408,21 @@ def bg_write_recommendation_to_opc(MAX_BIAS_PERCENTAGE):
         Recom.loc[i, 'bias_value'] = min(mxv, Recom.loc[i, 'bias_value'])
     Recom['value'] = Recom['current_value'] + Recom['bias_value']
 
-    # # Calculate O2 Set Point based on GrossMW from DCS
-    # q = f"""SELECT f_value FROM {_DB_NAME_}.cb_display disp
-    #         LEFT JOIN {_DB_NAME_}.tb_bat_raw raw
-    #         on disp.f_tags = raw.f_address_no 
-    #         WHERE f_desc = "generator_gross_load" """
-    # dcs_mw = pd.read_sql(q, engine).values[0][0]
-    # dcs_o2 = DCS_O2.predict(dcs_mw)
+    # Calculate O2 Set Point based on GrossMW from DCS
+    q = f"""SELECT f_value FROM {_DB_NAME_}.cb_display disp
+            LEFT JOIN {_DB_NAME_}.tb_bat_raw raw
+            on disp.f_tags = raw.f_address_no 
+            WHERE f_desc = "generator_gross_load" """
+    dcs_mw = pd.read_sql(q, engine).values[0][0]
+    dcs_o2 = DCS_O2.predict(dcs_mw)
 
-    # Change to tag
-    q = f"""SELECT f_value FROM tb_tags_read_conf conf
-        LEFT JOIN tb_bat_raw raw
-        ON conf.f_tag_name = raw.f_address_no
-        WHERE f_description = "DCS O2 SET POINT" """
-    df = pd.read_sql(q, engine)
-    dcs_o2 = df.values[0][0]
+    # # Change to tag
+    # q = f"""SELECT f_value FROM tb_tags_read_conf conf
+    #     LEFT JOIN tb_bat_raw raw
+    #     ON conf.f_tag_name = raw.f_address_no
+    #     WHERE f_description = "DCS O2 SET POINT" """
+    # df = pd.read_sql(q, engine)
+    # dcs_o2 = df.values[0][0]
 
     opc_write = Recom.merge(Write_tags, how='left', left_on='f_description', right_on='f_description')
     opc_write = opc_write[['f_tag_name_y', 'f_description','ts',config.PARAMETER_BIAS, config.PARAMETER_SET_POINT]].dropna()
@@ -425,7 +441,7 @@ def bg_write_recommendation_to_opc(MAX_BIAS_PERCENTAGE):
     opc_write['ts'] = pd.to_datetime(time.ctime())
 
     if o2_idx is not None:
-        opc_write.loc[o2_idx, 'value'] = dcs_o2 - opc_write.loc[o2_idx, 'value']
+        opc_write.loc[o2_idx, 'value'] = opc_write.loc[o2_idx, 'value'] - dcs_o2
 
     # # Remove tags that disabled partially
     # for C in Enable_status.keys():
@@ -616,8 +632,8 @@ def bg_ml_runner():
     if 'DEBUG_MODE' in parameters.index:
         DEBUG_MODE = False if (str(int(parameters['DEBUG_MODE'])).lower() in ['0','false',0]) else True
     
-    # logging(f'DEBUG_MODE : {DEBUG_MODE}')
-    # logging(f'COPT ENABLE: {bool(ENABLE_COPT)}')
+    logging(f'DEBUG_MODE : {DEBUG_MODE}')
+    logging(f'COPT ENABLE: {bool(ENABLE_COPT)}')
     
     if DEBUG_MODE:
         if ENABLE_COPT:
