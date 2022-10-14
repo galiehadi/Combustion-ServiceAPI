@@ -107,12 +107,17 @@ def bg_combustion_safeguard_check():
     Safeguard_status = True
     Safeguard_text = ''
     Alarms = []
+    Individual_safeguard_values = []
+
     for i in sg.index:
         _, tagname, description, bracketOpen, value, bracketClose = sg.iloc[i]
         bracketClose = bracketClose.replace('==','=').replace("=","==")
         Safeguard_text += f"{bracketOpen}{value}{bracketClose} "
 
         bracketClose_ = bracketClose.replace('AND','').replace('OR','')
+        setValue = bracketClose_
+        while setValue.count(')') > setValue.count('('):
+            setValue = setValue[::-1].replace(')','',1)[::-1]
         individualRule = f"{bracketOpen}{value}{bracketClose_} ".lower()
         individualAlarm = {
             'f_timestamp': ts,
@@ -123,6 +128,15 @@ def bg_combustion_safeguard_check():
         }
         try: 
             if not eval(individualRule): Alarms.append(individualAlarm)
+            
+            individualValues = {
+                'sequence': i,
+                'setValue': setValue, 
+                'actualValue': value,
+                'tagDescription': description.strip(),
+                'status': eval(individualRule)
+            }
+            Individual_safeguard_values.append(individualValues)
         except:
             Alarms.append(individualAlarm)
 
@@ -132,7 +146,9 @@ def bg_combustion_safeguard_check():
     ret = {
         'Safeguard Status': Safeguard_status,
         'Execution time': str(round(time.time() - t0,3)) + ' sec',
-        'Individual Alarm': Alarms
+        'Individual Alarm': Alarms,
+        'Individual Safeguard': Individual_safeguard_values,
+        'Safeguard Text': Safeguard_text
     }
     return ret
 

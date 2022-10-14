@@ -6,9 +6,10 @@ from numpy import asanyarray
 from UiService import *
 from BackgroundService import *
 import traceback
+import logging as systemlog
 
-# log = logging.getLogger('werkzeug')
-# log.setLevel(logging.ERROR)
+log = systemlog.getLogger('werkzeug')
+log.setLevel(systemlog.ERROR)
 app = Flask(__name__)
 cors = CORS(app, supports_credentials=True)
 debug_mode = False
@@ -204,7 +205,13 @@ def safeguard_check():
     }
 
     try:
-        data['object'] = bg_safeguard_update()
+        ret = bg_safeguard_update()
+        data['object'] = {
+            'ruleLogic': ret['Safeguard Text'],
+            'ruleValue': ret['Safeguard Status'],
+            'detailRule': ret['Individual Safeguard'],
+            'label': 'Safeguard'
+        }
         data['message'] = 'Success'
         
         # sisipan
