@@ -295,8 +295,8 @@ def bg_safeguard_update():
     # and append alarm history
     if combustion_enable and not copt_safeguard_status:
         # Send alarm to OPC
-        q = f"""SELECT f_tag_name FROM {_DB_NAME_}.tb_tags_read_conf conf
-                WHERE f_description = "Excess O2" """
+        q = f"""SSELECT f_tags FROM {_DB_NAME_}.cb_display c
+                WHERE f_desc = "{O2_tag}" """
         o2_recom_tag = pd.read_sql(q, engine).values[0][0]
 
         logging('Some of safeguards are violated. Turning off COPT ...')
