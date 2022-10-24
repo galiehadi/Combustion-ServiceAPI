@@ -686,7 +686,7 @@ def bg_ml_runner():
             # Latest recommendation
             q = f"""SELECT gen.model_id, gen.ts, conf.f_tag_name, conf.f_description, 
                     gen.value, gen.bias_value, gen.enable_status, gen.value - gen.bias_value AS 'current_value' 
-                    FROM {_DB_NAME_}.tb_tags_read_conf conf
+                    FROM {_DB_NAME_}.tb_tags_write_conf conf
                     LEFT JOIN {_DB_NAME_}.tb_combustion_model_generation gen
                     ON conf.f_description = gen.tag_name 
                     WHERE f_category = "Recommendation"
