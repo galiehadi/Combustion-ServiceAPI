@@ -295,53 +295,60 @@ def bg_safeguard_update():
     # and append alarm history
     if combustion_enable and not copt_safeguard_status:
         # Send alarm to OPC
-        q = f"""SSELECT f_tags FROM {_DB_NAME_}.cb_display c
-                WHERE f_desc = "{O2_tag}" """
-        o2_recom_tag = pd.read_sql(q, engine).values[0][0]
+        try:
+            logging('Some of safeguards are violated. Turning off COPT ...')
+            q = f"""SSELECT f_tags FROM {_DB_NAME_}.cb_display c
+                    WHERE f_desc = "{O2_tag}" """
+            o2_recom_tag = pd.read_sql(q, engine).values[0][0]
 
-        logging('Some of safeguards are violated. Turning off COPT ...')
-        
-        # Revert all changes
-        copt_enable = df[COPTenable_name].max()
-        o2_bias = o2_current - DCS_O2.predict(mw_current)
-
-        opc_write = [[o2_recom_tag, ts, o2_bias]]
-        opc_write = pd.DataFrame(opc_write, columns=['tag_name','ts','value'])
-        
-        opc_write.to_sql('tb_opc_write_copt', engine, if_exists='append', index=False)
-        opc_write.to_sql('tb_opc_write_history_copt', engine, if_exists='append', index=False)
-
-        # Append alarm history
-        Alarms = S_COPT['Individual Alarm']
-        AlarmDF = pd.DataFrame(Alarms)
-        AlarmDF.to_sql('tb_combustion_alarm_history', engine, if_exists='append', index=False)
-
-        # Write alarm 102 to DCS 
-        for table in ['tb_opc_write_copt','tb_opc_write_history_copt']:
-            q = f"""INSERT IGNORE INTO {_DB_NAME_}.{table}
-                    SELECT f_tag_name AS tag_name, NOW() AS ts, 102 AS value FROM {_DB_NAME_}.tb_tags_write_conf ttwc 
-                    WHERE f_description = "{config.DESC_ALARM}" """
+            logging('Some of safeguards are violated. Turning off COPT ...')
             
-            with engine.connect() as conn: res = conn.execute(q)
+            # Revert all changes
+            copt_enable = df[COPTenable_name].max()
+            o2_bias = o2_current - DCS_O2.predict(mw_current)
+
+            opc_write = [[o2_recom_tag, ts, o2_bias]]
+            opc_write = pd.DataFrame(opc_write, columns=['tag_name','ts','value'])
+            
+            opc_write.to_sql('tb_opc_write_copt', engine, if_exists='append', index=False)
+            opc_write.to_sql('tb_opc_write_history_copt', engine, if_exists='append', index=False)
+
+            # Append alarm history
+            Alarms = S_COPT['Individual Alarm']
+            AlarmDF = pd.DataFrame(Alarms)
+            AlarmDF.to_sql('tb_combustion_alarm_history', engine, if_exists='append', index=False)
+
+            # Write alarm 102 to DCS 
+            for table in ['tb_opc_write_copt','tb_opc_write_history_copt']:
+                q = f"""INSERT IGNORE INTO {_DB_NAME_}.{table}
+                        SELECT f_tag_name AS tag_name, NOW() AS ts, 102 AS value FROM {_DB_NAME_}.tb_tags_write_conf ttwc 
+                        WHERE f_description = "{config.DESC_ALARM}" """
+                
+                with engine.connect() as conn: res = conn.execute(q)
+        except Exception as E:
+            logging(f"Turning off COPT failed: {E}")
     
     if copt_safeguard_status:
         # Checking last alarm
-        q = f"""SELECT value FROM {_DB_NAME_}.tb_opc_write_history_copt
-                WHERE tag_name = (SELECT conf.f_tag_name FROM {_DB_NAME_}.tb_tags_write_conf conf
-                                WHERE f_description = "{config.DESC_ALARM}")
-                ORDER BY ts DESC
-                LIMIT 1"""
-        alarm_current_status = pd.read_sql(q, engine)
-        if len(alarm_current_status) > 0: alarm_current_status = int(alarm_current_status.values)
-        else: alarm_current_status = 102
-        if alarm_current_status != 100:
-            # Write back alarm 100 to DCS 
-            for table in ['tb_opc_write_copt','tb_opc_write_history_copt']:
-                q = f"""INSERT IGNORE INTO {_DB_NAME_}.{table}
-                        SELECT f_tag_name AS tag_name, NOW() AS ts, 100 AS value FROM {_DB_NAME_}.tb_tags_write_conf ttwc 
-                        WHERE f_description = "{config.DESC_ALARM}" """
-                with engine.connect() as conn: res = conn.execute(q)
-            logging(f'Write to OPC: {config.DESC_ALARM}: 102 changed to 100')
+        try:
+            q = f"""SELECT value FROM {_DB_NAME_}.tb_opc_write_history_copt
+                    WHERE tag_name = (SELECT conf.f_tag_name FROM {_DB_NAME_}.tb_tags_write_conf conf
+                                    WHERE f_description = "{config.DESC_ALARM}")
+                    ORDER BY ts DESC
+                    LIMIT 1"""
+            alarm_current_status = pd.read_sql(q, engine)
+            if len(alarm_current_status) > 0: alarm_current_status = int(alarm_current_status.values)
+            else: alarm_current_status = 102
+            if alarm_current_status != 100:
+                # Write back alarm 100 to DCS 
+                for table in ['tb_opc_write_copt','tb_opc_write_history_copt']:
+                    q = f"""INSERT IGNORE INTO {_DB_NAME_}.{table}
+                            SELECT f_tag_name AS tag_name, NOW() AS ts, 100 AS value FROM {_DB_NAME_}.tb_tags_write_conf ttwc 
+                            WHERE f_description = "{config.DESC_ALARM}" """
+                    with engine.connect() as conn: res = conn.execute(q)
+                logging(f'Write to OPC: {config.DESC_ALARM}: 102 changed to 100')
+        except Exception as E:
+            logging(f"Failed to send alarm to OPC: {E}")
     return S_COPT
 
 
