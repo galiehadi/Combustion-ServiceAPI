@@ -108,6 +108,7 @@ def bg_combustion_safeguard_check():
     Safeguard_text = ''
     Alarms = []
     Individual_safeguard_values = []
+    
     for i in sg.index:
         _, tagname, description, bracketOpen, value, bracketClose = sg.iloc[i]
         bracketClose = bracketClose.replace('==','=').replace("=","==")
