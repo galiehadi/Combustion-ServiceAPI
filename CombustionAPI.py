@@ -74,19 +74,31 @@ def alarm_history_id(alarmID):
         data['message'] = str(E)
     return data
 
-@app.route('/service/copt/bat/combustion/update/alarm-history/<alarmID>', methods=['POST'])
-def alarm_history_post(alarmID):
+@app.route('/service/copt/bat/combustion/update/alarm-history', methods=['POST'])
+def alarm_history_post():
     payload = dict(request.get_json())
-
-    objects = post_alarm(payload)
-
+    
     data = {
-        "message": "Success" if (objects['Status'] == "Success") else "Failed",
+        "message": "Failed",
         "total": 1,
         "limit": 1,
         "page": 0,
-        "object": objects
+        "object": {}
     }
+    
+    try:
+        objects = post_alarm(payload)
+
+        data = {
+            "message": "Success" if (objects['Status'] == "Success") else "Failed",
+            "object": objects
+        }
+    except Exception as E:
+        data['message'] = str(E)
+        
+    if objects['Status'] != 'Success':
+        print(data)
+        return make_response(jsonify(data), 404)
 
     return data
 

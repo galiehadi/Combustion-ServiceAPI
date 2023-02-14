@@ -214,26 +214,28 @@ def bg_combustion_watchdog_check():
     Watchdog_safe = Watchdog_status == 1
     if not Watchdog_safe and COPT_status == 1:
         logging('Watchdog are disconnected. Turning off COPT ...')
+        try:
+            q = f"""UPDATE db_bat_rmb1.tb_bat_raw
+                    SET f_value=0,f_updated_at=NOW(),f_date_rec=NOW()
+                    WHERE f_address_no=(SELECT f_tag_name FROM tb_tags_read_conf ttrc 
+                    WHERE f_description = "{config.DESC_ENABLE_COPT}");"""
+            with engine.connect() as conn: res = conn.execute(q)
 
-        q = f"""UPDATE db_bat_rmb1.tb_bat_raw
-                SET f_value=0,f_updated_at=NOW(),f_date_rec=NOW()
-                WHERE f_address_no=(SELECT f_tag_name FROM tb_tags_read_conf ttrc 
-                WHERE f_description = "{config.DESC_ENABLE_COPT}");"""
-        with engine.connect() as conn: res = conn.execute(q)
+            Alarm = [[pd.to_datetime('now'), 'Watchdog','WatchdogStatus == 1', Watchdog_status, 0]]
+            Alarm = pd.DataFrame(Alarm, columns=["f_timestamp", "f_desc", "f_set_value", "f_actual_value", "f_rule_header"])
+            Alarm.to_sql('tb_combustion_alarm_history', engine, if_exists='append', index=False)
 
-        Alarm = [[pd.to_datetime('now'), 'Watchdog','WatchdogStatus == 1', Watchdog_status, 0]]
-        Alarm = pd.DataFrame(Alarm, columns=["f_timestamp", "f_desc", "f_set_value", "f_actual_value", "f_rule_header"])
-        Alarm.to_sql('tb_combustion_alarm_history', engine, if_exists='append', index=False)
+            q = f"""SELECT f_tag_name FROM tb_tags_write_conf
+                    WHERE f_description = "Combustion Alarm" """
+            alarm_tag = pd.read_sql(q, engine).values[0][0]
 
-        q = f"""SELECT f_tag_name FROM tb_tags_write_conf
-                WHERE f_description = "Combustion Alarm" """
-        alarm_tag = pd.read_sql(q, engine).values[0][0]
+            opc_write = [[alarm_tag, pd.to_datetime('now'), 101]]
+            opc_write = pd.DataFrame(opc_write, columns=['tag_name','ts','value'])
 
-        opc_write = [[alarm_tag, pd.to_datetime('now'), 101]]
-        opc_write = pd.DataFrame(opc_write, columns=['tag_name','ts','value'])
-        
-        opc_write.to_sql('tb_opc_write_copt', engine, if_exists='append', index=False)
-        opc_write.to_sql('tb_opc_write_history_copt', engine, if_exists='append', index=False)
+            opc_write.to_sql('tb_opc_write_copt', engine, if_exists='append', index=False)
+            opc_write.to_sql('tb_opc_write_history_copt', engine, if_exists='append', index=False)
+        except Exception as E:
+            logging(f"Failed to turn off COPT: {E}")
     
     ret = {
         'Watchdog Status': Watchdog_status,
@@ -295,13 +297,11 @@ def bg_safeguard_update():
     # and append alarm history
     if combustion_enable and not copt_safeguard_status:
         # Send alarm to OPC
+        logging('Some of safeguards are violated. Turning off COPT ...')
         try:
-            logging('Some of safeguards are violated. Turning off COPT ...')
-            q = f"""SSELECT f_tags FROM {_DB_NAME_}.cb_display c
+            q = f"""SELECT f_tags FROM {_DB_NAME_}.cb_display c
                     WHERE f_desc = "{O2_tag}" """
             o2_recom_tag = pd.read_sql(q, engine).values[0][0]
-
-            logging('Some of safeguards are violated. Turning off COPT ...')
             
             # Revert all changes
             copt_enable = df[COPTenable_name].max()
@@ -316,17 +316,53 @@ def bg_safeguard_update():
             # Append alarm history
             Alarms = S_COPT['Individual Alarm']
             AlarmDF = pd.DataFrame(Alarms)
-            AlarmDF.to_sql('tb_combustion_alarm_history', engine, if_exists='append', index=False)
+            
+            # Latest alarm checking
+            fdesc_condition = tuple(np.unique(AlarmDF['f_desc']))
+            if len(fdesc_condition) == 1: fdesc_condition = f"('{fdesc_condition[0]}')"
+            f_set_value_condition = tuple(np.unique(AlarmDF['f_set_value']))
+            if len(f_set_value_condition) == 1: f_set_value_condition = f"('{f_set_value_condition[0]}')"
+            q = f"""SELECT * FROM tb_combustion_alarm_history 
+                WHERE f_timestamp > NOW() - INTERVAL 5 MINUTE 
+                AND f_desc IN {fdesc_condition} 
+                AND f_set_value IN {f_set_value_condition} 
+                ORDER BY f_timestamp DESC LIMIT 10"""
+            Latest_alarm = pd.read_sql(q, engine)
+            if len(Latest_alarm) == 0:
+                AlarmDF.to_sql('tb_combustion_alarm_history', engine, if_exists='append', index=False)
+            else:
+                #! di cek lagi harusnya apa
+                pass 
 
             # Write alarm 102 to DCS 
-            for table in ['tb_opc_write_copt','tb_opc_write_history_copt']:
-                q = f"""INSERT IGNORE INTO {_DB_NAME_}.{table}
-                        SELECT f_tag_name AS tag_name, NOW() AS ts, 102 AS value FROM {_DB_NAME_}.tb_tags_write_conf ttwc 
-                        WHERE f_description = "{config.DESC_ALARM}" """
-                
-                with engine.connect() as conn: res = conn.execute(q)
+            q = f"""SELECT * FROM tb_opc_write_copt
+                WHERE tag_name = (SELECT f_tag_name AS tag_name FROM {_DB_NAME_}.tb_tags_write_conf ttwc 
+                WHERE f_description = "{config.DESC_ALARM}")
+                ORDER BY ts DESC LIMIT 10 """
+            Latest_OPC_alarm = pd.read_sql(q, engine)
+            
+            if len(Latest_OPC_alarm) != 0:
+                if Latest_OPC_alarm.iloc[0]["value"] != 102:
+                    Latest_OPC_alarm_timestamp = Latest_OPC_alarm.query('value == 102')['ts'].max()
+                    raise(ValueError(f"""Alarm has been executed on "{Latest_OPC_alarm_timestamp}". Waiting on OPC Writers to execute. """))
+            
+            # Force truncate opc write and re-disable COPT
+            q = f"""SELECT COUNT(*) FROM tb_opc_write_copt"""
+            opc_write_count = pd.read_sql(q, engine).values[0][0]
+            
+            with engine.connect() as conn:
+                if opc_write_count > 15:
+                    q = f"TRUNCATE tb_opc_write_copt"
+                    conn.execute()
+                    
+                for table in ['tb_opc_write_copt','tb_opc_write_history_copt']:
+                    q = f"""INSERT IGNORE INTO {_DB_NAME_}.{table}
+                            SELECT f_tag_name AS tag_name, NOW() AS ts, 102 AS value FROM {_DB_NAME_}.tb_tags_write_conf ttwc 
+                            WHERE f_description = "{config.DESC_ALARM}" """
+                    conn.execute(q)
+                    
         except Exception as E:
-            logging(f"Turning off COPT failed: {E}")
+            logging(f"Failed to turning off COPT: {E}")
     
     if copt_safeguard_status:
         # Checking last alarm
@@ -684,25 +720,27 @@ def bg_ml_runner():
         if (now - LATEST_RECOMMENDATION_TIME) < pd.Timedelta(f'{RECOM_EXEC_INTERVAL}min'):
             # TODO: make a smooth transition recommendation
             logging(f"Last recommendation was {(now - LATEST_RECOMMENDATION_TIME)} ago. Sending recommendation values to OPC smoothly.")
-            # Checking current O2 level
-            q = f"""SELECT raw.f_value FROM {_DB_NAME_}.cb_display disp
-                    LEFT JOIN {_DB_NAME_}.tb_bat_raw raw
-                    ON disp.f_tags = raw.f_address_no 
-                    WHERE disp.f_desc = "excess_o2" """
-            current_oxygen = pd.read_sql(q, engine).values[0][0]
-            # Latest recommendation
-            q = f"""SELECT gen.model_id, gen.ts, conf.f_tag_name, conf.f_description, 
-                    gen.value, gen.bias_value, gen.enable_status, gen.value - gen.bias_value AS 'current_value' 
-                    FROM {_DB_NAME_}.tb_tags_write_conf conf
-                    LEFT JOIN {_DB_NAME_}.tb_combustion_model_generation gen
-                    ON conf.f_description = gen.tag_name 
-                    WHERE f_category = "Recommendation"
-                    AND gen.ts = (SELECT MAX(ts) FROM {_DB_NAME_}.tb_combustion_model_generation tcmg)"""
-            Recom = pd.read_sql(q, engine)
-            set_point_oxygen = float(Recom[Recom['f_description'] == 'Excess Oxygen Sensor']['value'])
-            if (abs(set_point_oxygen - current_oxygen) < config.OXYGEN_STEADY_STATE_LEVEL): 
-                logging(f'Oxygen is in steady state level ({current_oxygen}).')
-                return {'message': 'Oxygen is in steady state level.'}
+            try:
+                # Checking current O2 level
+                q = f"""SELECT raw.f_value FROM {_DB_NAME_}.cb_display disp
+                        LEFT JOIN {_DB_NAME_}.tb_bat_raw raw
+                        ON disp.f_tags = raw.f_address_no 
+                        WHERE disp.f_desc = "excess_o2" """
+                current_oxygen = pd.read_sql(q, engine).values[0][0]
+                # Latest recommendation
+                q = f"""SELECT gen.model_id, gen.ts, conf.f_tag_name, conf.f_description, 
+                        gen.value, gen.bias_value, gen.enable_status, gen.value - gen.bias_value AS 'current_value' 
+                        FROM {_DB_NAME_}.tb_tags_write_conf conf
+                        LEFT JOIN {_DB_NAME_}.tb_combustion_model_generation gen
+                        ON conf.f_description = gen.tag_name 
+                        WHERE gen.ts = (SELECT MAX(ts) FROM {_DB_NAME_}.tb_combustion_model_generation tcmg)"""
+                Recom = pd.read_sql(q, engine)
+                set_point_oxygen = float(Recom[Recom['f_description'] == 'Excess Oxygen Sensor']['value'])
+                if (abs(set_point_oxygen - current_oxygen) < config.OXYGEN_STEADY_STATE_LEVEL): 
+                    logging(f'Oxygen is in steady state level ({current_oxygen}).')
+                    return {'message': 'Oxygen is in steady state level.'}
+            except Exception as E:
+                logging(f"Error sending recommendation to opc! Error: {E}")
             
             # Write recommendation to OPC
             bg_write_recommendation_to_opc(MAX_BIAS_PERCENTAGE)

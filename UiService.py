@@ -97,7 +97,9 @@ def get_comb_tags():
     return df.to_dict()['text']
 
 def get_parameter():
-    q = f"""SELECT f_parameter_id AS 'id', f_label AS 'label', f_default_value AS 'value' FROM {_DB_NAME_}.tb_combustion_parameters"""
+    q = f"""SELECT f_parameter_id AS 'id', f_label AS 'label', f_default_value AS 'value' 
+            FROM {_DB_NAME_}.tb_combustion_parameters
+            WHERE f_label != "MAX_BIAS_PERCENTAGE" """
     df = pd.read_sql(q, engine)
     df = df.to_dict(orient='records')
     
@@ -106,7 +108,7 @@ def get_parameter():
 def get_recommendations(payload = None, sql_interval = '1 DAY', download = False):
     if type(payload) == dict:
         endDate = pd.to_datetime('now').ceil('1d') 
-        startDate = endDate - pd.to_timedelta('7 day')
+        startDate = endDate - pd.to_timedelta('90 day')
         if 'startDate' in payload.keys():
             startDate = pd.to_datetime(payload['startDate'])
         if 'endDate' in payload.keys():
@@ -257,7 +259,8 @@ def get_parameter_detailed(parameter_id):
 
 def get_all_parameter():
     q = f"""SELECT f_parameter_id AS id, f_label AS label, f_default_value AS value FROM {_DB_NAME_}.tb_combustion_parameters
-            WHERE f_is_active = 1"""
+            WHERE f_is_active = 1 
+            AND f_label != "MAX_BIAS_PERCENTAGE" """
     df = pd.read_sql(q, engine)
     return save_to_path(df, "parameters")
 
@@ -341,4 +344,20 @@ def post_parameter(payload):
     return {'Status':'Success'}
 
 def post_alarm(payload):
-    return {'Status': 'Failed'}
+    ret = {
+        'Status': 'Failed',
+        'Message': ''
+    }
+    for key in ['alarmId', 'desc']:
+        if key not in payload.keys(): 
+            ret['Message']: f"Key `{key}` not in payload."
+            return ret
+    
+    q = f"""UPDATE tb_combustion_alarm_history
+            SET f_desc = "{payload['desc']}"
+            WHERE f_int_id = "{payload['alarmId']}" """
+    with engine.connect() as conn:
+        rett = conn.execute(q)
+        ret['Message'] = f'Success changing {rett.rowcount} line(s).'
+        ret['Status'] = 'Success'
+    return ret
