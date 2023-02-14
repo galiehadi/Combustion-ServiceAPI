@@ -2,13 +2,12 @@ from distutils.log import debug
 from flask import Flask, request, jsonify, make_response, send_file
 from flask_cors import CORS, cross_origin
 from itsdangerous import json
-from numpy import asanyarray
 from UiService import *
 from BackgroundService import *
 import logging, traceback
 
-# log = logging.getLogger('werkzeug')
-# log.setLevel(logging.ERROR)
+log = logging.getLogger('werkzeug')
+log.setLevel(logging.ERROR)
 app = Flask(__name__)
 cors = CORS(app, supports_credentials=True)
 debug_mode = False
@@ -73,19 +72,31 @@ def alarm_history_id(alarmID):
         data['message'] = str(E)
     return data
 
-@app.route('/service/copt/bat/combustion/update/alarm-history/<alarmID>', methods=['POST'])
-def alarm_history_post(alarmID):
+@app.route('/service/copt/bat/combustion/update/alarm-history', methods=['POST'])
+def alarm_history_post():
     payload = dict(request.get_json())
-
-    objects = post_alarm(payload)
-
+    
     data = {
-        "message": "Success" if (objects['Status'] == "Success") else "Failed",
+        "message": "Failed",
         "total": 1,
         "limit": 1,
         "page": 0,
-        "object": objects
+        "object": {}
     }
+    
+    try:
+        objects = post_alarm(payload)
+
+        data = {
+            "message": "Success" if (objects['Status'] == "Success") else "Failed",
+            "object": objects
+        }
+    except Exception as E:
+        data['message'] = str(E)
+        
+    if objects['Status'] != 'Success':
+        print(data)
+        return make_response(jsonify(data), 404)
 
     return data
 
@@ -174,17 +185,20 @@ def input_parameter():
 
 @app.route('/service/copt/bat/combustion/export/<kind>', methods=['GET'])
 def export_to_file(kind):
+    payload = request.args.to_dict()
+    logging(f'Payload: {payload}')
+
     kinds = ['recommendation','parameter-settings','rules-settings','alarm-history']
     if kind not in kinds: return make_response(f'"{kind}" not found. Please use one of {kinds}', 404)
 
     if kind == 'recommendation':
-        filepath = get_recommendations(sql_interval='7 DAY', download=True)
+        filepath = get_recommendations(payload, sql_interval='7 DAY', download=True)
     elif kind == 'parameter-settings':
         filepath = get_all_parameter()
     elif kind == 'rules-settings':
         filepath = get_all_rules_detailed()
     elif kind == 'alarm-history':
-        filepath = get_alarm_history(0, 400, download=True)
+        filepath = get_alarm_history(payload=payload, download=True)
     else:
         return f'"{kind}" not found. Please use one of {kinds}'
     return send_file(filepath, as_attachment=True)
@@ -201,7 +215,13 @@ def safeguard_check():
     }
 
     try:
-        data['object'] = bg_safeguard_update()
+        ret = bg_safeguard_update()
+        data['object'] = {
+            'ruleLogic': ret['Safeguard Text'],
+            'ruleValue': ret['Safeguard Status'],
+            'detailRule': ret['Individual Safeguard'],
+            'label': 'Safeguard'
+        }
         data['message'] = 'Success'
         
         # sisipan
