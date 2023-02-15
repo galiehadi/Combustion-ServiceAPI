@@ -1,5 +1,5 @@
-docker stop services-combustion-rbg1
-docker rm services-combustion-rbg1
-docker image rm  services-combustion-rbg1:v1.5.4
-docker image load -i services-combustion-rbg1-v1.5.4.tar
-docker run -itd --name services-combustion-rbg1 --restart unless-stopped --memory="300M" -p 0.0.0.0:8083:8083 services-combustion-rbg1:v1.5.4
+docker stop service-copt-amg1
+docker rm service-copt-amg1
+docker image rm  service-copt-amg1:v1.16
+docker image load -i service-copt-amg1-v1.16.tar
+docker run -itd --name service-copt-amg1 --restart unless-stopped --memory="500M" -p 0.0.0.0:8083:8083 service-copt-amg1:v1.16

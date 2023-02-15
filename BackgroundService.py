@@ -1,772 +1,1333 @@
+# from operator import index
 import pandas as pd
-import numpy as np
-import time, sqlalchemy, requests, config, re, traceback
+# import numpy as np
+import time, db_config, sqlalchemy, requests
 from urllib.parse import quote_plus as urlparse
-from pprint import pprint
-from regional_regressor import RegionalLinearReg
+# from pprint import pprint
+from datetime import datetime
+from asyncio.tasks import sleep
+from random import random
+# import threading
 
-_UNIT_CODE_ = config._UNIT_CODE_
-_UNIT_NAME_ = config._UNIT_NAME_
-_USER_ = config._USER_
-_PASS_ = urlparse(config._PASS_)
-_IP_ = config._IP_
-_DB_NAME_ = config._DB_NAME_
-_LOCAL_IP_ = config._LOCAL_IP_
-_LOCAL_MODE_ = False
+_UNIT_CODE_ = db_config._UNIT_CODE_
+_UNIT_NAME_ = db_config._UNIT_NAME_
+_USER_ = db_config._USER_
+_PASS_ = urlparse(db_config._PASS_)
+_IP_ = db_config._IP_
+_DB_NAME_ = db_config._DB_NAME_
+_LOCAL_IP_ = db_config._LOCAL_IP_
+
+
+# LOCAL_MODE = True
+# if LOCAL_MODE:
+#     _IP_ = 'localhost:3308'
+#     _LOCAL_IP_ = 'localhost'
 
 # Default values
 DEBUG_MODE = True
-dcs_x = config.DCS_X
-dcs_y = config.DCS_Y
-DCS_O2 = RegionalLinearReg(dcs_x, dcs_y)
+dcs_x = [0, 150, 255, 300, 330]
+dcs_y = [8, 6.0, 4.5, 4.0, 4.0]
 
 con = f"mysql+mysqlconnector://{_USER_}:{_PASS_}@{_IP_}/{_DB_NAME_}"
 engine = sqlalchemy.create_engine(con)
-# conn = engine.connect()
+perm_bias_alarm = {}
 
 def logging(text):
-    t = time.strftime('%Y-%m-%d %X (%z)')
+    t = time.strftime('%Y-%m-%d %X')
     print(f"[{t}] - {text}")
 
-def bg_update_notification():
-    # Get status enable now
-    q = f"""SELECT raw.f_address_no, raw.f_value, '' AS f_message, raw.f_updated_at FROM tb_tags_read_conf conf 
-        LEFT JOIN tb_bat_raw raw
-        ON conf.f_tag_name = raw.f_address_no 
-        WHERE f_description = "{config.DESC_ENABLE_COPT}" """
-    df_status_now = pd.read_sql(q, engine)
-    tag_name, status_now, message, timestamp_now = df_status_now.iloc[0].values
-    timestamp_now = pd.to_datetime(timestamp_now).strftime('%Y-%m-%d %X')
+def bg_update_permissive_bias():
+    tag_perm_bias = get_constrain(db_config.COPT_PERM_BIAS)
+    if bg_is_permissive_bias_in_range():
+        write_to_opc(tag_perm_bias, 1)
+        return True
+    
+    return False
 
-    # Get latest update on message
-    q = f"""SELECT notif.f_value from tb_tags_read_conf conf
-        LEFT JOIN tb_bat_notif notif 
-        ON conf.f_tag_name = notif.f_address_no 
-        WHERE conf.f_description = "COMBUSTION ENABLE"
-        ORDER BY notif.f_updated_at DESC LIMIT 1"""
-    df_status_last = pd.read_sql(q, engine)
-    status_last = df_status_last['f_value'].values[0]
-
-    if status_last != status_now:
-        if int(status_now):
-            message = f'COPT Enabled on {timestamp_now}'
-        else:
-            # Alarm messages
-            q = f"""SELECT f_timestamp, f_desc, f_set_value, f_actual_value FROM tb_combustion_alarm_history
-                WHERE f_timestamp > NOW() - INTERVAL 2 MINUTE
-                ORDER BY f_timestamp DESC """
-            df_alarm = pd.read_sql(q, engine)
-            df_alarm = df_alarm.drop_duplicates(subset=['f_desc','f_set_value'], keep='first')
-
-            alarm_message = ' \nSafeguard Violated:'
-            for i in df_alarm.index:
-                alarm_timestamp, _, alarm_set_val, alarm_act_val = df_alarm.loc[i]
-                alarm_timestamp = pd.to_datetime(alarm_timestamp).strftime('%Y-%m-%d %X')
-                alarm = f" \n[{alarm_timestamp}] - {alarm_set_val} ({alarm_act_val})"
-                alarm_message += alarm
-
-            message = f'COPT Disabled on {timestamp_now}.'
-            if len(alarm_message) > 25:
-                message += alarm_message
-        q = f"""INSERT INTO tb_bat_notif (f_address_no,f_value,f_message,f_updated_at)
-                VALUES ("{tag_name}", {status_now}, "{message}", "{timestamp_now}") """
-        print(message)
-        try:
-            with engine.connect() as conn: res = conn.execute(q)
-        except Exception as E: 
-            logging(f"Failed to execute INSERT: {E}")
-            pass
-
-    return
-
-def bg_combustion_safeguard_check():
-    t0 = time.time()
+def bg_is_permissive_bias_in_range():
+    global perm_bias_alarm
+    tags = get_constrains([db_config.COPT_OXY_LEFT, db_config.COPT_OXY_RIGHT])
     q = f"""SELECT
-                NOW() AS timestamp,
-                rule.f_tag_sensor,
-                conf.f_description,
-                rule.f_bracket_open,
-                raw.f_value,
-                rule.f_bracket_close
-            FROM
-                {_DB_NAME_}.tb_combustion_rules_dtl rule
-            LEFT JOIN {_DB_NAME_}.tb_bat_raw raw ON
-                rule.f_tag_sensor = raw.f_address_no
-            LEFT JOIN {_DB_NAME_}.tb_combustion_rules_hdr hdr ON
-                rule.f_rule_hdr_id = hdr.f_rule_hdr_id
-            LEFT JOIN {_DB_NAME_}.tb_tags_read_conf conf ON 
-                rule.f_tag_sensor = conf.f_tag_name 
-            WHERE
-                hdr.f_rule_descr = "SAFEGUARD" AND
-                rule.f_is_active = 1
-            ORDER BY
-                rule.f_sequence"""
-    sg = pd.read_sql(q, engine)
-    ts = sg['timestamp'].max()
+            ttrc.f_description, 
+            tbr.f_address_no,
+            tbr.f_value
+        FROM
+            tb_bat_raw tbr
+        JOIN
+        tb_tags_read_conf ttrc ON
+            ttrc.f_tag_name = tbr.f_address_no
+        WHERE
+            tbr.f_address_no IN {tuple(tags)}"""
+    df = pd.read_sql(q, con)
 
-    Safeguard_status = True
-    Safeguard_text = ''
-    Alarms = []
-    Individual_safeguard_values = []
+    bias_min = float(get_parameter_value(db_config.COPT_BIAS_MIN))
+    bias_max = float(get_parameter_value(db_config.COPT_BIAS_MAX))
+    perm_bias_alarm = {}
+    is_in_range = True
     
-    for i in sg.index:
-        _, tagname, description, bracketOpen, value, bracketClose = sg.iloc[i]
-        bracketClose = bracketClose.replace('==','=').replace("=","==")
-        Safeguard_text += f"{bracketOpen}{value}{bracketClose} "
+    for i in df.index:
+        tag_desc, tag_name, tag_value = df.iloc[i]
+        tag_value = round(float(tag_value),2)
 
-        bracketClose_ = bracketClose.replace('AND','').replace('OR','')
-        setValue = bracketClose_
-        while setValue.count(')') > setValue.count('('):
-            setValue = setValue[::-1].replace(')','',1)[::-1]
-        individualRule = f"{bracketOpen}{value}{bracketClose_} ".lower()
-        individualAlarm = {
-            'f_timestamp': ts,
-            'f_desc': 'Safeguard',
-            'f_set_value': f"{bracketOpen}{description}{bracketClose_}",
-            'f_actual_value':str(value),
-            'f_rule_header': 20
-        }
-        try: 
-            if not eval(individualRule): Alarms.append(individualAlarm)
-            
-            individualValues = {
-                'sequence': i,
-                'setValue': setValue, 
-                'actualValue': value,
-                'tagDescription': description.strip(),
-                'status': eval(individualRule)
-            }
-            Individual_safeguard_values.append(individualValues)
-        except:
-            Alarms.append(individualAlarm)
-
-    Safeguard_text = Safeguard_text.lower()
-    Safeguard_status = eval(Safeguard_text)
-
-    ret = {
-        'Safeguard Status': Safeguard_status,
-        'Execution time': str(round(time.time() - t0,3)) + ' sec',
-        'Individual Alarm': Alarms,
-        'Individual Safeguard': Individual_safeguard_values,
-        'Safeguard Text': Safeguard_text
-    }
-    return ret
-
-def bg_sootblow_safeguard_check():
-    t0 = time.time()
-    q = f"""SELECT
-                NOW() AS timestamp,
-                rule.f_tag_sensor,
-                conf.f_description,
-                rule.f_bracket_open,
-                raw.f_value,
-                rule.f_bracket_close
-            FROM
-                {_DB_NAME_}.tb_combustion_rules_dtl rule
-            LEFT JOIN {_DB_NAME_}.tb_bat_raw raw ON
-                rule.f_tag_sensor = raw.f_address_no
-            LEFT JOIN {_DB_NAME_}.tb_combustion_rules_hdr hdr ON
-                rule.f_rule_hdr_id = hdr.f_rule_hdr_id
-            LEFT JOIN {_DB_NAME_}.tb_tags_read_conf conf ON 
-                rule.f_tag_sensor = conf.f_tag_name 
-            WHERE
-                hdr.f_rule_descr = "SAFEGUARD" AND
-                rule.f_is_active = 1
-            ORDER BY
-                rule.f_sequence"""
-    sg = pd.read_sql(q, engine)
-    ts = sg['timestamp'].max()
-
-    Safeguard_status = True
-    Safeguard_text = ''
-    Alarms = []
-    for i in sg.index:
-        _, tagname, description, bracketOpen, value, bracketClose = sg.iloc[i]
-        bracketClose = bracketClose.replace('==','=').replace("=","==")
-        Safeguard_text += f"{bracketOpen}{value}{bracketClose} "
-
-    Safeguard_text = Safeguard_text.lower()
-    Safeguard_status = eval(Safeguard_text)
-
-    ret = {
-        'Safeguard Status': Safeguard_status,
-        'Execution time': str(round(time.time() - t0,3)) + ' sec',
-        'Individual Alarm': Alarms
-    }
-    return ret
-
-def bg_combustion_watchdog_check():
-    t0 = time.time()
-    q = f"""SELECT f_value FROM tb_bat_raw tbr 
-            WHERE f_address_no = "{config.WATCHDOG_TAG}" """
-    q = f"""SELECT conf.f_description, raw.f_value FROM tb_bat_raw raw
-            LEFT JOIN tb_tags_read_conf conf
-            ON conf.f_tag_name = raw.f_address_no 
-            WHERE conf.f_description = "COMBUSTION ENABLE"
-            UNION 
-            SELECT raw.f_address_no, raw.f_value FROM tb_bat_raw raw
-            WHERE f_address_no = "WatchdogStatus" """
-    DF = pd.read_sql(q, engine)
-    DF = DF.set_index('f_description')['f_value']
-    Watchdog_status = int(DF[config.WATCHDOG_TAG])
-    COPT_status = int(DF[config.DESC_ENABLE_COPT])
+        if not (tag_value >= bias_min and tag_value <= bias_max):
+            is_in_range = False
+            perm_bias_alarm.update({tag_desc: str(tag_value) + '%'})
     
-    Watchdog_safe = Watchdog_status == 1
-    if not Watchdog_safe and COPT_status == 1:
-        logging('Watchdog are disconnected. Turning off COPT ...')
-        try:
-            q = f"""UPDATE db_bat_rmb1.tb_bat_raw
-                    SET f_value=0,f_updated_at=NOW(),f_date_rec=NOW()
-                    WHERE f_address_no=(SELECT f_tag_name FROM tb_tags_read_conf ttrc 
-                    WHERE f_description = "{config.DESC_ENABLE_COPT}");"""
-            with engine.connect() as conn: res = conn.execute(q)
+    return is_in_range;
 
-            Alarm = [[pd.to_datetime('now'), 'Watchdog','WatchdogStatus == 1', Watchdog_status, 0]]
-            Alarm = pd.DataFrame(Alarm, columns=["f_timestamp", "f_desc", "f_set_value", "f_actual_value", "f_rule_header"])
-            Alarm.to_sql('tb_combustion_alarm_history', engine, if_exists='append', index=False)
+# def bg_is_permissive_bias_in_range():
+#     global perm_bias_alarm
+#     tags = get_constrains([db_config.COPT_OXY_LEFT, db_config.COPT_OXY_RIGHT])
+#     q = f"""SELECT
+#             ttrc.f_description, 
+#             tbr.f_address_no,
+#             tbr.f_value
+#         FROM
+#             tb_bat_raw tbr
+#         JOIN
+#         tb_tags_read_conf ttrc ON
+#             ttrc.f_tag_name = tbr.f_address_no
+#         WHERE
+#             tbr.f_address_no IN {tuple(tags)}"""
+#     df = pd.read_sql(q, con)
+#
+#     bias_min = float(get_parameter_value(db_config.COPT_BIAS_MIN))
+#     bias_max = float(get_parameter_value(db_config.COPT_BIAS_MAX))
+#     perm_bias_alarm = {}
+#
+#     copt_run = get_tag_value(get_constrain(db_config.COPT_LAMP_INDICATOR))
+#
+#     if not copt_run:
+#         return False
+#
+#     for i in df.index:
+#         tag_desc, tag_name, tag_value = df.iloc[i]
+#         tag_value = round(float(tag_value),2)
+#         perm_bias_alarm.update({tag_desc:tag_value})
+#
+#         if tag_value >= bias_min and tag_value <= bias_max:
+#             return True
+#
+#     return False
 
-            q = f"""SELECT f_tag_name FROM tb_tags_write_conf
-                    WHERE f_description = "Combustion Alarm" """
-            alarm_tag = pd.read_sql(q, engine).values[0][0]
-
-            opc_write = [[alarm_tag, pd.to_datetime('now'), 101]]
-            opc_write = pd.DataFrame(opc_write, columns=['tag_name','ts','value'])
-
-            opc_write.to_sql('tb_opc_write_copt', engine, if_exists='append', index=False)
-            opc_write.to_sql('tb_opc_write_history_copt', engine, if_exists='append', index=False)
-        except Exception as E:
-            logging(f"Failed to turn off COPT: {E}")
-    
-    ret = {
-        'Watchdog Status': Watchdog_status,
-        'Execution time': str(round(time.time() - t0,3)) + ' sec'
-    }
-    return ret
-
-
-# TODO: Reconstruct safeguard updates
-def bg_safeguard_update():
-    S_COPT = bg_combustion_safeguard_check()
-    S_SOPT = bg_sootblow_safeguard_check()
-    WD_STATUS = bg_combustion_watchdog_check()
-    copt_safeguard_status = S_COPT['Safeguard Status']
-    sopt_safeguard_status = S_SOPT['Safeguard Status']
-
-    O2_tag, GrossMW_tag, COPTenable_name = ['excess_o2', 'generator_gross_load', config.DESC_ENABLE_COPT]
-
-    # Always update COPT safeguard status
-    q = f"""UPDATE {_DB_NAME_}.tb_bat_raw SET f_date_rec=NOW(), f_value={1 if copt_safeguard_status else 0}, f_updated_at=NOW()
-            WHERE f_address_no = "{config.SAFEGUARD_TAG}" """
-    
-    try:
-        with engine.connect() as conn: res = conn.execute(q)
-    except Exception as E:
-        logging(f"Failed to update COPT SAFEGUARD: {E}")
+def copt_ok_check():
+    global g_already_write_copt_disable_alarm
+    if is_copt_ok():
+        g_already_write_copt_disable_alarm = 0
+        param_skip_fan_auto = get_copt_parameter(db_config.SKIP_FAN_AUTO)
         
-    # Always update SOPT safeguard status
-    q = f"""UPDATE {_DB_NAME_}.tb_bat_raw SET f_date_rec=NOW(), f_value={1 if sopt_safeguard_status else 0}, f_updated_at=NOW()
-            WHERE f_address_no = "{config.SAFEGUARD_SOPT_TAG}" """
+        if param_skip_fan_auto == 1:
+            is_enable = True
+        else:
+            is_enable = is_fan_in_auto_mode(is_copt_ok)
+        enable_copt_run(is_enable)
+        update_copt_last_running()
     
+
+def get_copt_parameter(param_name):
+    q = f"""SELECT
+                f_default_value
+            FROM
+                tb_combustion_parameters tcp
+            WHERE
+                tcp.f_label = '{param_name}'"""
+    df = pd.read_sql(q, con)
+    
+    return df['f_default_value'].loc[0]
+
+def get_parameter_value(param_id):
+    q = f"""SELECT
+                f_default_value
+            FROM
+                tb_combustion_parameters tcp
+            WHERE
+                tcp.f_parameter_id = '{param_id}'"""
+    df = pd.read_sql(q, con)
+    
+    return df['f_default_value'].loc[0]
+
+def get_constrain(id):
+    q = f"""SELECT
+                f_constraint 
+            FROM
+                tb_comb_constraint tcc
+            WHERE
+                tcc.f_int_id = {id}"""
+    df = pd.read_sql(q, con)
+    
+    return df['f_constraint'].loc[0]
+
+def get_constrains(ids):
+    q = f"""SELECT
+                f_constraint 
+            FROM
+                tb_comb_constraint tcc
+            WHERE
+                tcc.f_int_id IN {tuple(ids)}"""
+    df = pd.read_sql(q, con)
+    return list(df['f_constraint'])
+
+def get_constrain_by_value(value):
+    q = f"""SELECT
+                f_constraint,
+                f_value
+            FROM
+                tb_comb_constraint tcc
+            WHERE
+                tcc.f_value LIKE '%{value}%' LIMIT 1"""
+    df = pd.read_sql(q, con)
+    
+    return df['f_constraint'].loc[0], df['f_value'].loc[0]
+
+def update_copt_last_running():
+    tag_ok = get_constrain(db_config.COPT_OK)
+    tag_on = get_constrain(db_config.COPT_ON)
+    q = f"""SELECT
+                f_value
+            FROM
+                tb_bat_raw_history tbrh
+            WHERE
+                tbrh.f_address_no = '{tag_ok}'
+            ORDER BY
+                tbrh.f_date_rec DESC
+            LIMIT 1"""
+    df = pd.read_sql(q, con)
+    last_copt_ok = df['f_value'].loc[0]
+    
+    if last_copt_ok == 'False':
+        q = f"""INSERT
+                    INTO
+                    tb_comb_constraint (f_int_id,
+                    f_constraint,
+                    f_value,
+                    f_is_active,
+                    f_last_update)
+                VALUES ({db_config.CONSTRAIN_ID_COPT_ON},
+                '{tag_on}',
+                'True',
+                1,
+                NOW())
+                            ON
+                DUPLICATE KEY
+                UPDATE
+                    f_last_update = NOW(),
+                    f_value = 'True'"""
+                    
+        with engine.connect() as conn:
+            res = conn.execute(q)
+        
+def update_comb_constrain(id, name, last_update, value=1):
+    q = f"""INSERT
+                INTO
+                tb_comb_constraint (f_int_id,
+                f_constraint,
+                f_value,
+                f_is_active,
+                f_last_update)
+            VALUES ({id},
+            '{name}',
+            '{value}',
+            1,
+            '{last_update}')
+                        ON
+            DUPLICATE KEY
+            UPDATE
+                f_last_update = '{last_update}',
+                f_value = '{value}'"""
+                
+    with engine.connect() as conn:
+        res = conn.execute(q)
+ 
+def enable_copt_run(is_enable):
+    tag_run = get_constrain(db_config.COPT_RUN)
+    write_to_opc(tag_run, is_enable)
+    
+# def enable_copt_run(is_enable):
+#     tag_run = get_constrain(db_config.COPT_RUN)
+#     copt_run = get_tag_value(tag_run)
+#
+#     if is_enable != copt_run:
+#         write_to_opc(tag_run, is_enable)
+    
+def is_copt_ok():
+    tag_ok = get_constrain(db_config.COPT_OK)
+    return get_tag_value(tag_ok)
+
+def bg_is_copt_enable():
+    tags = get_constrains([db_config.COPT_ON, db_config.SAFEGUARD_DCS])
+    q = f"""SELECT
+            f_address_no,
+            f_value
+        FROM
+            tb_bat_raw tbr
+        WHERE
+            tbr.f_address_no IN {tuple(tags)}"""
+    df = pd.read_sql(q, con)
+    copt_dict = {}
+    
+    for i in df.index:
+        tag_name, tag_value = df.iloc[i]
+        copt_dict.update({tag_name: tag_value})
+    
+    copt_list = list(copt_dict.values())
+    
+    if copt_list[0] and copt_list[1]:
+        return True
+    else:
+        return False
+    
+def get_copt_enable_status():
+    tag_enable = get_constrain(db_config.COPT_ENABLE)
+    q = f"""SELECT
+            f_value
+        FROM
+            tb_bat_raw tbr
+        WHERE
+            tbr.f_address_no = '{tag_enable}'"""
+    df = pd.read_sql(q, con)
+    
+    return True if df['f_value'].loc[0] == 'True' else False
+
+def bg_set_copt_enable(is_enable):
+    tag_enable = get_constrain(db_config.COPT_ENABLE)
+    q = f"""INSERT INTO {_DB_NAME_}.tb_bat_raw (f_address_no, f_date_rec, f_value, f_data_type, f_updated_at) VALUES ('{tag_enable}', NOW(), '{is_enable}', 'Boolean', NOW())
+            ON DUPLICATE KEY UPDATE f_date_rec = NOW(), f_value = '{is_enable}', f_updated_at = NOW()"""
+            
+    with engine.connect() as conn:
+        res = conn.execute(q)
+        
+def write_to_bat_raw(tag_name, tag_value, tag_type,):
+    q = f"""INSERT INTO {_DB_NAME_}.tb_bat_raw (f_address_no, f_date_rec, f_value, f_data_type, f_updated_at) VALUES ('{tag_name}', NOW(), '{tag_value}', '{tag_type}', NOW())
+            ON DUPLICATE KEY UPDATE f_date_rec = NOW(), f_value = '{tag_value}', f_updated_at = NOW()"""
+            
+    with engine.connect() as conn:
+        res = conn.execute(q)
+        
+def is_copt_on():
+    tag_on = get_constrain(db_config.COPT_ON)
+    q = f"""SELECT
+            tbr.f_value
+        FROM
+            tb_bat_raw tbr
+        WHERE
+            tbr.f_address_no = '{tag_on}'"""
+    df = pd.read_sql(q, con)
+    
+    return True if df['f_value'].loc[0] == 'True' else False
+        
+# def bg_helper_update_copt_run():
+#     logging(f"Checking AUTO mode in SA Fan, PA Fan, ID Fan and PA Booster")
+#     for i in range(10):
+#         is_auto_mode = is_fan_in_auto_mode()
+#         if is_auto_mode:
+#             logging(f"Enabling {db_config.COPT_RUN}")
+#             write_to_opc(db_config.COPT_RUN, 1)
+#             return True
+#
+#         if i == 9:
+#             logging(f"Not in AUTO mode, Failed to enabling {db_config.COPT_RUN}")
+#             return False
+#
+#         time.sleep(1)
+        
+def test_write_tag(tag_name, value):
+    write_to_opc(tag_name, value)
+
+def read_tag(tag):
+    q = f"""SELECT
+            tbr.f_address_no, f_value
+        FROM
+            tb_bat_raw tbr
+        WHERE
+            tbr.f_address_no = '{tag}'"""
+    df = pd.read_sql(q, con)
+    
+    logging(f"RESPONSE:")
+    logging(df)
+    
+def get_tag_value(tag):
+    q = f"""SELECT
+            tbr.f_value
+        FROM
+            tb_bat_raw tbr
+        WHERE
+            tbr.f_address_no = '{tag}'"""
+    df = pd.read_sql(q, con)
+    
+    raw_value = df['f_value'].loc[0]
+    
+    if raw_value == 'True':
+        return True
+    if raw_value == 'False':
+        return False
+    
+    return raw_value    
+
+def write_to_opc(tag_name, value):
     try:
-        with engine.connect() as conn: res = conn.execute(q)
-    except Exception as E:
-        logging(f"Failed to update SOPT SAFEGUARD: {E}")
+        opc_write = [[tag_name, datetime.now(), value]]
+        opc_write = pd.DataFrame(opc_write, columns=['f_tag','f_timestamp','f_value'])
+        opc_write.to_sql('tb_opc_write', con, if_exists='append', index=False)
+        opc_write.to_sql('tb_opc_write_history', con, if_exists='append', index=False)
+    except Exception as e:
+        logging(e)
+        
+def write_to_opc_exclude_history(tag_name, value):
+    try:
+        opc_write = [[tag_name, datetime.now(), value]]
+        opc_write = pd.DataFrame(opc_write, columns=['f_tag','f_timestamp','f_value'])
+        opc_write.to_sql('tb_opc_write', con, if_exists='append', index=False)
+        # opc_write.to_sql('tb_opc_write_history', con, if_exists='append', index=False)
+    except Exception as e:
+        logging(e)
+        
 
-    # Get current condition
-    q = f"""SELECT NOW() AS f_date_rec, f_description as name, raw.f_value FROM {_DB_NAME_}.tb_tags_read_conf conf
-            LEFT JOIN {_DB_NAME_}.tb_bat_raw raw
-            ON conf.f_tag_name = raw.f_address_no 
-            WHERE conf.f_description = "{config.DESC_ENABLE_COPT}" 
-            UNION 
-            SELECT NOW() AS f_date_rec, f_address_no AS name, f_value FROM {_DB_NAME_}.tb_bat_raw raw
-            WHERE f_address_no = "{config.SAFEGUARD_TAG}"
-            UNION
-            SELECT NOW() AS f_date_rec, disp.f_desc AS name, raw.f_value FROM {_DB_NAME_}.cb_display disp
-            LEFT JOIN {_DB_NAME_}.tb_bat_raw raw
-            ON disp.f_tags = raw.f_address_no 
-            WHERE disp.f_desc IN ("{O2_tag}", "{GrossMW_tag}") """
-    df = pd.read_sql(q, engine)
-    ts = df['f_date_rec'].max()
-    df = df.set_index('name')['f_value']
-    safeguard_current = bool(df[config.SAFEGUARD_TAG])
-    combustion_enable = bool(df[config.DESC_ENABLE_COPT])
-    mw_current = df[GrossMW_tag]
-    o2_current = df[O2_tag]
-
-    # If combustion is enabled and safeguard is down, disable the recommendations, revert back to its original condition
-    # and append alarm history
-    if combustion_enable and not copt_safeguard_status:
-        # Send alarm to OPC
-        logging('Some of safeguards are violated. Turning off COPT ...')
-        try:
-            q = f"""SELECT f_tags FROM {_DB_NAME_}.cb_display c
-                    WHERE f_desc = "{O2_tag}" """
-            o2_recom_tag = pd.read_sql(q, engine).values[0][0]
-            
-            # Revert all changes
-            copt_enable = df[COPTenable_name].max()
-            o2_bias = o2_current - DCS_O2.predict(mw_current)
-
-            opc_write = [[o2_recom_tag, ts, o2_bias]]
-            opc_write = pd.DataFrame(opc_write, columns=['tag_name','ts','value'])
-            
-            opc_write.to_sql('tb_opc_write_copt', engine, if_exists='append', index=False)
-            opc_write.to_sql('tb_opc_write_history_copt', engine, if_exists='append', index=False)
-
-            # Append alarm history
-            Alarms = S_COPT['Individual Alarm']
-            AlarmDF = pd.DataFrame(Alarms)
-            
-            # Latest alarm checking
-            fdesc_condition = tuple(np.unique(AlarmDF['f_desc']))
-            if len(fdesc_condition) == 1: fdesc_condition = f"('{fdesc_condition[0]}')"
-            f_set_value_condition = tuple(np.unique(AlarmDF['f_set_value']))
-            if len(f_set_value_condition) == 1: f_set_value_condition = f"('{f_set_value_condition[0]}')"
-            q = f"""SELECT * FROM tb_combustion_alarm_history 
-                WHERE f_timestamp > NOW() - INTERVAL 5 MINUTE 
-                AND f_desc IN {fdesc_condition} 
-                AND f_set_value IN {f_set_value_condition} 
-                ORDER BY f_timestamp DESC LIMIT 10"""
-            Latest_alarm = pd.read_sql(q, engine)
-            if len(Latest_alarm) == 0:
-                AlarmDF.to_sql('tb_combustion_alarm_history', engine, if_exists='append', index=False)
-            else:
-                #! di cek lagi harusnya apa
-                pass 
-
-            # Write alarm 102 to DCS 
-            q = f"""SELECT * FROM tb_opc_write_copt
-                WHERE tag_name = (SELECT f_tag_name AS tag_name FROM {_DB_NAME_}.tb_tags_write_conf ttwc 
-                WHERE f_description = "{config.DESC_ALARM}")
-                ORDER BY ts DESC LIMIT 10 """
-            Latest_OPC_alarm = pd.read_sql(q, engine)
-            
-            if len(Latest_OPC_alarm) != 0:
-                if Latest_OPC_alarm.iloc[0]["value"] != 102:
-                    Latest_OPC_alarm_timestamp = Latest_OPC_alarm.query('value == 102')['ts'].max()
-                    raise(ValueError(f"""Alarm has been executed on "{Latest_OPC_alarm_timestamp}". Waiting on OPC Writers to execute. """))
-            
-            # Force truncate opc write and re-disable COPT
-            q = f"""SELECT COUNT(*) FROM tb_opc_write_copt"""
-            opc_write_count = pd.read_sql(q, engine).values[0][0]
-            
-            with engine.connect() as conn:
-                if opc_write_count > 15:
-                    q = f"TRUNCATE tb_opc_write_copt"
-                    conn.execute()
-                    
-                for table in ['tb_opc_write_copt','tb_opc_write_history_copt']:
-                    q = f"""INSERT IGNORE INTO {_DB_NAME_}.{table}
-                            SELECT f_tag_name AS tag_name, NOW() AS ts, 102 AS value FROM {_DB_NAME_}.tb_tags_write_conf ttwc 
-                            WHERE f_description = "{config.DESC_ALARM}" """
-                    conn.execute(q)
-                    
-        except Exception as E:
-            logging(f"Failed to turning off COPT: {E}")
+def is_fan_in_auto_mode(copt_ok):
+    # memastikan parameter di bawah terpenuhi (True)
+    # tags = get_constrains([db_config.COPT_SA_FAN, db_config.COPT_PA_FAN, db_config.COPT_PA_BOOSTER, db_config.COPT_ID_FAN])
+    tags = get_constrains([db_config.COPT_SA_FAN, db_config.COPT_PA_FAN, db_config.COPT_ID_FAN])
+    q = f"""SELECT
+            ttrc.f_description, tbr.f_value
+        FROM
+            tb_bat_raw tbr
+        JOIN tb_tags_read_conf ttrc ON
+            ttrc.f_tag_name = tbr.f_address_no
+        WHERE
+            tbr.f_address_no IN {tuple(tags)}"""
+    df = pd.read_sql(q, con)
+    copt_dict = {}
     
-    if copt_safeguard_status:
-        # Checking last alarm
-        try:
-            q = f"""SELECT value FROM {_DB_NAME_}.tb_opc_write_history_copt
-                    WHERE tag_name = (SELECT conf.f_tag_name FROM {_DB_NAME_}.tb_tags_write_conf conf
-                                    WHERE f_description = "{config.DESC_ALARM}")
-                    ORDER BY ts DESC
-                    LIMIT 1"""
-            alarm_current_status = pd.read_sql(q, engine)
-            if len(alarm_current_status) > 0: alarm_current_status = int(alarm_current_status.values)
-            else: alarm_current_status = 102
-            if alarm_current_status != 100:
-                # Write back alarm 100 to DCS 
-                for table in ['tb_opc_write_copt','tb_opc_write_history_copt']:
-                    q = f"""INSERT IGNORE INTO {_DB_NAME_}.{table}
-                            SELECT f_tag_name AS tag_name, NOW() AS ts, 100 AS value FROM {_DB_NAME_}.tb_tags_write_conf ttwc 
-                            WHERE f_description = "{config.DESC_ALARM}" """
-                    with engine.connect() as conn: res = conn.execute(q)
-                logging(f'Write to OPC: {config.DESC_ALARM}: 102 changed to 100')
-        except Exception as E:
-            logging(f"Failed to send alarm to OPC: {E}")
-    return S_COPT
+    for i in df.index:
+        tag_name, tag_value = df.iloc[i]
+        copt_dict.update({tag_name: True if tag_value == 'True' else False})
+    
+    copt_list = list(copt_dict.values())
+    
+    # if copt_list[0] or copt_list[1] or copt_list[2] or copt_list[3]:
+    if copt_list[0] and copt_list[1] and copt_list[2]:
+        return True
+    else:
+        if copt_ok:
+            copt_dict = {key:val for key, val in copt_dict.items() if val == False}
+            actual_value = str(copt_dict).replace('{', '').replace('}', '').replace('True','Auto').replace('False', 'Manual').replace('\'','')
+            write_alarm(actual_value, 'COPT ENABLE FAIL: FAN NOT IN AUTO MODE', 0)
+        return False
 
+def bg_safeguard_check():
+    t0 = time.time()
+    q = f"""
+        SELECT
+            rule.f_rule_dtl_id,
+            rule.f_tag_sensor,
+            conf.f_description,
+            rule.f_sequence,
+            rule.f_bracket_open,
+            raw.f_value,
+            rule.f_bracket_close,
+            rule.f_violated_count,
+            rule.f_max_violated
+        FROM
+            {_DB_NAME_}.tb_combustion_rules_dtl rule
+        LEFT JOIN {_DB_NAME_}.tb_bat_raw raw ON
+            rule.f_tag_sensor = raw.f_address_no
+        LEFT JOIN {_DB_NAME_}.tb_combustion_rules_hdr hdr ON
+            rule.f_rule_hdr_id = hdr.f_rule_hdr_id
+        LEFT JOIN {_DB_NAME_}.tb_tags_read_conf conf ON 
+            rule.f_tag_sensor = conf.f_tag_name 
+        WHERE
+            hdr.f_rule_hdr_id = {db_config.RULE_SAFEGUARD}
+        ORDER BY
+            rule.f_sequence"""
+    df = pd.read_sql(q, con)
+    df['f_max_violated'] = df['f_max_violated'].fillna(2)
+
+    Safeguard_status = True
+    Safeguard_text = ''
+
+    individual_results = []
+    for i in df.index:
+        description, bracketOpen, value, bracketClose = df[['f_description','f_bracket_open','f_value','f_bracket_close']].iloc[i]
+        Safeguard_text += f"{bracketOpen}{value}{bracketClose} "
+
+        safeguard_text = f"{bracketOpen} {df.loc[i, 'f_value']} {bracketClose}"
+        safeguard_text = safeguard_text.lower().replace('and','').replace('or','').replace('false','False').replace('=','==')
+        safeguard_text = safeguard_text.replace('====','==').replace('(','').replace(')','')
+
+        safeguard_result = eval(safeguard_text)
+        individual_results.append(safeguard_result)
+
+    Safeguard_text = Safeguard_text.lower().replace('=', '==').replace('TRUE','True').replace('true','True').replace('FALSE','False').replace('false','False')
+    Safeguard_status = eval(Safeguard_text)
+
+    df['individual_safeguard'] = individual_results
+    df['f_violated_count'] = [vc+1 if not sr else 0 for vc,sr in df[['f_violated_count', 'individual_safeguard']].values]
+    df['safeguard_violated'] = df['f_violated_count'] < df['f_max_violated']
+    all_safeguard = df['safeguard_violated'].min()
+
+    # Update safeguard counter
+    with engine.connect() as conn:
+        send = df[['f_rule_dtl_id','f_violated_count']]
+        for i in send.index:
+            q = f"""UPDATE tb_combustion_rules_dtl
+                    SET f_violated_count = {int(send.loc[i, 'f_violated_count'])}
+                    WHERE f_rule_dtl_id = {int(send.loc[i, 'f_rule_dtl_id'])} """
+            conn.execute(q)
+
+    RetObject = df[['f_sequence','f_description','f_value','f_bracket_close','individual_safeguard']]
+    RetObject = RetObject.rename(columns = {
+        'f_sequence':'sequence',
+        'f_description': 'tagDescription',
+        'f_value': 'actualValue',
+        'f_bracket_close': 'setValue',
+        'individual_safeguard': 'status'
+    })
+
+    # Bypass safeguard status with safeguard counter
+    Safeguard_status = bool(all_safeguard)
+
+    if not Safeguard_status:
+        retprint = RetObject[RetObject['status'] == False][['tagDescription','actualValue','setValue']].values
+        retprint = '\n'.join([' '.join(f) for f in retprint])
+        logging(f"SAFEGUARD not in Safe conditions:\n{retprint}")
+
+    ret = {
+        'Safeguard Status': Safeguard_status,
+        'Execution time': str(round(time.time() - t0,3)) + ' sec',
+        'detailRule': RetObject.to_dict(orient='records'),
+        'label': 'Safeguard',
+        'ruleLogic': Safeguard_text,
+        'ruleValue': Safeguard_status,
+    }
+    return ret
+
+def is_safeguard_safe():
+    tag_safeguard = get_constrain(db_config.SAFEGUARD_BAT)
+    q = f"""SELECT
+            tbr.f_value
+        FROM
+            tb_bat_raw tbr
+        WHERE
+            tbr.f_address_no = '{tag_safeguard}'"""
+    df = pd.read_sql(q, con)
+    
+    return True if df['f_value'].loc[0] == 'True' else False
+
+def bg_safeguard_update_runner():
+    while True:
+        bg_safeguard_update()
+        time.sleep(db_config.COPT_BG_SLEEP_TIME)
+
+def get_latest_safeguard():
+    tag_safeguard = get_constrain(db_config.SAFEGUARD_DCS)
+    q = f"""SELECT
+                f_value
+            FROM
+                tb_bat_raw_history tbrh
+            WHERE
+                tbrh.f_date_rec > NOW() - INTERVAL 1 HOUR
+                AND tbrh.f_address_no = '{tag_safeguard}'
+            ORDER BY
+                tbrh.f_date_rec DESC
+            LIMIT 1"""
+    df = pd.read_sql(q, con)
+    
+    return True if df['f_value'].loc[0] == 'True' else False
+    
+def bg_safeguard_update():
+    ret = bg_safeguard_check()
+    Safeguard_status = ret['Safeguard Status']
+
+    # Update SAFEGUARD WEB INDICATOR (1 if Safe, 0 if Not Safe)
+    tag_safeguard = get_constrain(db_config.SAFEGUARD_BAT)
+    q = f"""INSERT INTO {_DB_NAME_}.tb_bat_raw (f_address_no, f_date_rec, f_value, f_data_type, f_updated_at) VALUES ('{tag_safeguard}', NOW(), '{Safeguard_status}', 'Boolean', NOW())
+            ON DUPLICATE KEY UPDATE f_date_rec = NOW(), f_value = '{Safeguard_status}', f_updated_at = NOW()"""
+    with engine.connect() as conn:
+        res = conn.execute(q)
+        
+    # Update SAFEGUARD DCS INDICATOR (1 if Not Safe, 0 is Safe)
+    tag_safeguard = get_constrain(db_config.SAFEGUARD_DCS)
+    opc_write = [[tag_safeguard, datetime.now(), 0 if Safeguard_status else 1]]
+    opc_write = pd.DataFrame(opc_write, columns=['f_tag','f_timestamp','f_value'])
+    opc_write.to_sql('tb_opc_write', con, if_exists='append', index=False)
+    opc_write.to_sql('tb_opc_write_history', con, if_exists='append', index=False)
+
+    # Update Tag Enable COPT to False if 
+    if not ret['Safeguard Status']:
+        tag_enable = get_constrain(db_config.COPT_ENABLE)
+        q = f"""INSERT INTO  {_DB_NAME_}.tb_bat_raw (f_address_no, f_date_rec, f_value, f_data_type, f_updated_at) VALUES ('{tag_enable}', NOW(), 'False', 'Boolean', NOW())
+            ON DUPLICATE KEY UPDATE f_date_rec = NOW(), f_value = 'False', f_updated_at = NOW()"""
+        with engine.connect() as conn:
+            res = conn.execute(q)
+    
+    return ret
 
 def bg_get_recom_exec_interval():
     q = f"""SELECT f_default_value FROM {_DB_NAME_}.tb_combustion_parameters tcp 
             WHERE f_label = 'RECOM_EXEC_INTERVAL' """
-    df = pd.read_sql(q, engine)
+    df = pd.read_sql(q, con)
     recom_exec_interval = float(df.values)
     return recom_exec_interval
 
-# Write recommendation periodical from operator parameters
-def bg_write_recommendation_to_opc(MAX_BIAS_PERCENTAGE):
-    q = f"""SELECT conf.f_description, raw.f_value FROM {_DB_NAME_}.tb_bat_raw raw
-            LEFT JOIN {_DB_NAME_}.tb_tags_read_conf conf
-            ON raw.f_address_no = conf.f_tag_name
-            WHERE conf.f_category LIKE "%ENABLE%" 
-            AND conf.f_is_active = 1
-            """
-    Enable_status_df = pd.read_sql(q, engine).set_index('f_description')['f_value']
-    Enable_status_df = Enable_status_df.replace(np.nan, 0)
-
-    # Enable tags
-    q = f"""SELECT f_category, f_description, f_tag_name FROM {_DB_NAME_}.tb_tags_write_conf
-            WHERE f_tag_use = "COPT"
-            AND f_is_active = 1 """
-    Write_tags = pd.read_sql(q, engine)
-
-    Enable_status = {}
-    for c in [config.DESC_ENABLE_COPT_BT, config.DESC_ENABLE_COPT_SEC, config.DESC_ENABLE_COPT_MOT]:
-        status = int(Enable_status_df[c]) if c in Enable_status_df.index else 0
-        tags = Write_tags[Write_tags['f_category'] == c]['f_tag_name'].values.tolist() if c in np.unique(Write_tags['f_category']) else []
-        Enable_status[c] = {
-            'status': status,
-            'tag_lists': tags
-        }
-
-    # Reading latest recommendation
-    q = f"""SELECT gen.model_id, gen.ts, conf.f_tag_name, conf.f_description, gen.value, gen.bias_value, gen.enable_status, 
-            gen.value - gen.bias_value AS current_value
-            FROM tb_combustion_model_generation gen
-            LEFT JOIN tb_tags_write_conf conf 
-            ON gen.tag_name = conf.f_description 
-            WHERE gen.ts = (SELECT MAX(ts) FROM tb_combustion_model_generation gen)
-            GROUP BY conf.f_description """
-    Recom = pd.read_sql(q, engine)
-    Recom = Recom.dropna(subset=['f_description'])
-    Recom['bias_value'] = Recom['value'] - Recom['current_value']
-
-    # Periodical commands
-    q = f"SELECT f_default_value FROM tb_combustion_parameters WHERE f_label = 'COMMAND_PERIOD'"
-    COMMAND_PERIOD = int(pd.read_sql(q, engine).values[0][0])
-
-    ts = Recom['ts'].max()
-    ct = pd.to_datetime(time.ctime())
-    recom_ke = (ct - ts).components.minutes + 1
-    if recom_ke > COMMAND_PERIOD: 
-        recom_ke = COMMAND_PERIOD
-    Recom['bias_value'] = Recom['bias_value'] * recom_ke / COMMAND_PERIOD
-    
-    # Limit recommendation to MAX_BIAS_PERCENTAGE %
-    for i in Recom.index:
-        mxv = MAX_BIAS_PERCENTAGE * abs(Recom.loc[i, 'current_value']) / 100
-        Recom.loc[i, 'bias_value'] = max(-mxv, Recom.loc[i, 'bias_value'])
-        Recom.loc[i, 'bias_value'] = min(mxv, Recom.loc[i, 'bias_value'])
-    Recom['value'] = Recom['current_value'] + Recom['bias_value']
-
-    # Calculate O2 Set Point based on GrossMW from DCS
-    q = f"""SELECT f_value FROM {_DB_NAME_}.cb_display disp
-            LEFT JOIN {_DB_NAME_}.tb_bat_raw raw
-            on disp.f_tags = raw.f_address_no 
-            WHERE f_desc = "generator_gross_load" """
-    dcs_mw = pd.read_sql(q, engine).values[0][0]
-    dcs_o2 = DCS_O2.predict(dcs_mw)
-
-    # # Change to tag
-    # q = f"""SELECT f_value FROM tb_tags_read_conf conf
-    #     LEFT JOIN tb_bat_raw raw
-    #     ON conf.f_tag_name = raw.f_address_no
-    #     WHERE f_description = "DCS O2 SET POINT" """
-    # df = pd.read_sql(q, engine)
-    # dcs_o2 = df.values[0][0]
-
-    opc_write = Recom.merge(Write_tags, how='left', left_on='f_description', right_on='f_description')
-    opc_write = opc_write[['f_tag_name_y', 'f_description','ts',config.PARAMETER_BIAS, config.PARAMETER_SET_POINT]].dropna()
-    opc_write['value_to_send'] = 0
-
-    o2_idx = None
-    for i in opc_write.index:
-        desc = opc_write.loc[i, 'f_description']
-        if 'Oxygen' in opc_write.loc[i, 'f_description']: o2_idx = i
-        elif 'O2' in opc_write.loc[i, 'f_description']: o2_idx = i
-        if desc in config.PARAMETER_WRITE.keys():
-            opc_write.loc[i, 'value_to_send'] = opc_write.loc[i, config.PARAMETER_SET_POINT] if config.PARAMETER_WRITE[desc] == config.PARAMETER_SET_POINT else opc_write.loc[i, config.PARAMETER_BIAS]
-    opc_write = opc_write[['f_tag_name_y', 'ts', 'value_to_send']]
-
-    opc_write.columns = ['tag_name','ts','value']
-    opc_write['ts'] = pd.to_datetime(time.ctime())
-
-    if o2_idx is not None:
-        opc_write.loc[o2_idx, 'value'] = opc_write.loc[o2_idx, 'value'] - dcs_o2
-
-    # # Remove tags that disabled partially
-    # for C in Enable_status.keys():
-    #     if not bool(Enable_status[C]['status']):
-    #         tags = Enable_status[C]['tag_lists']
-    #         opc_write = opc_write.drop(index = opc_write[opc_write['tag_name'].isin(tags)].index)
-    
-    opc_write.to_sql('tb_opc_write_copt', engine, if_exists='append', index=False)
-    opc_write.to_sql('tb_opc_write_history_copt', engine, if_exists='append', index=False)
-    logging(f'Write to OPC: \n{opc_write}\n')
-    return 'Done!'
-    
-
-# Write recommendation slowly with reading realtime data
-def bg_write_recommendation_to_opc1(MAX_BIAS_PERCENTAGE):
-    # Enable Status
-    q = f"""SELECT conf.f_description, raw.f_value FROM {_DB_NAME_}.tb_bat_raw raw
-            LEFT JOIN {_DB_NAME_}.tb_tags_read_conf conf
-            ON raw.f_address_no = conf.f_tag_name
-            WHERE conf.f_category LIKE "%ENABLE%" 
-            AND conf.f_is_active = 1
-            """
-    Enable_status_df = pd.read_sql(q, engine).set_index('f_description')['f_value']
-    Enable_status_df = Enable_status_df.replace(np.nan, 0)
-
-    # Enable tags
-    q = f"""SELECT f_category, f_description, f_tag_name FROM {_DB_NAME_}.tb_tags_write_conf
-            WHERE f_tag_use = "COPT" """
-    Write_tags = pd.read_sql(q, engine)
-    Write_tags
-
-    Enable_status = {}
-    for c in [config.DESC_ENABLE_COPT_BT, config.DESC_ENABLE_COPT_SEC, config.DESC_ENABLE_COPT_MOT]:
-        status = int(Enable_status_df[c]) if c in Enable_status_df.index else 0
-        tags = Write_tags[Write_tags['f_category'] == c]['f_tag_name'].values.tolist() if c in np.unique(Write_tags['f_category']) else []
-        Enable_status[c] = {
-            'status': status,
-            'tag_lists': tags
-        }
-
-    # Limit recommendations to +- MAX_BIAS_PERCENTAGE %
-    q = f"""SELECT gen.model_id, gen.ts, conf.f_tag_name, conf.f_description, gen.value, gen.bias_value, gen.enable_status, 
-            (CASE WHEN gen.tag_name = "Total Secondary Air Flow" THEN AVG(raw.f_value*2) ELSE raw.f_value END) AS current_value
-            FROM tb_combustion_model_generation gen
-            LEFT JOIN tb_tags_read_conf conf
-            ON gen.tag_name = conf.f_description 
-            LEFT JOIN tb_bat_raw raw 
-            ON conf.f_tag_name = raw.f_address_no 
-            WHERE gen.ts = (SELECT MAX(ts) FROM tb_combustion_model_generation gen)
-            AND conf.f_category != "Recommendation"
-            AND conf.f_is_active = 1
-            GROUP BY gen.tag_name"""
-    Recom = pd.read_sql(q, engine)
-    Recom['bias_value'] = Recom['value'] - Recom['current_value']
-
-    o2_idx = None
-    # Limit recommendation to MAX_BIAS_PERCENTAGE %
-    for i in Recom.index:
-        mxv = MAX_BIAS_PERCENTAGE * abs(Recom.loc[i, 'current_value']) / 100
-        Recom.loc[i, 'bias_value'] = max(-mxv, Recom.loc[i, 'bias_value'])
-        Recom.loc[i, 'bias_value'] = min(mxv, Recom.loc[i, 'bias_value'])
-        if 'Oxygen' in Recom.loc[i, 'f_description']: o2_idx = i
-        elif 'O2' in Recom.loc[i, 'f_description']: o2_idx = i
-    Recom['value'] = Recom['current_value'] + Recom['bias_value']
-
-    # Calculate O2 Set Point based on GrossMW from DCS
-    q = f"""SELECT f_value FROM {_DB_NAME_}.cb_display disp
-            LEFT JOIN {_DB_NAME_}.tb_bat_raw raw
-            on disp.f_tags = raw.f_address_no 
-            WHERE f_desc = "generator_gross_load" """
-    dcs_mw = pd.read_sql(q, engine).values[0][0]
-    dcs_o2 = DCS_O2.predict(dcs_mw)
-
-    opc_write = Recom.merge(Write_tags, how='left', left_on='f_description', right_on='f_description')[['f_tag_name_y','ts','value']].dropna()
-    opc_write.columns = ['tag_name','ts','value']
-    opc_write['ts'] = pd.to_datetime(time.ctime())
-
-    if o2_idx is not None:
-        opc_write.loc[o2_idx, 'value'] = opc_write.loc[o2_idx, 'value'] - dcs_o2
-
-    # Remove tags that disabled partially
-    for C in Enable_status.keys():
-        if not bool(Enable_status[C]['status']):
-            tags = Enable_status[C]['tag_lists']
-            opc_write = opc_write.drop(index = opc_write[opc_write['tag_name'].isin(tags)].index)
-    
-    opc_write.to_sql('tb_opc_write_copt', engine, if_exists='append', index=False)
-    opc_write.to_sql('tb_opc_write_history_copt', engine, if_exists='append', index=False)
-    logging(f'Write to OPC: {opc_write}')
-    return 'Done!'
-
-def bg_get_ml_model_status():
-    q = f"""SELECT message FROM {_DB_NAME_}.tb_combustion_model_message 
-        WHERE ts = (SELECT MAX(ts) FROM {_DB_NAME_}.tb_combustion_model_message)
-        AND ts > (NOW() - INTERVAL 1 HOUR) """
-    message = pd.read_sql(q, engine)
-    if len(message) > 0:
-        message = message.values[0][0]
-        code = message.split(':')[0]
-        code = int(re.findall('[0-9]+', code)[0])
-        return code
-    return 'Failed'
-
 def bg_get_ml_recommendation():
-    ret = {
-        'status': "Failed",
-        'message': '',
-    }
     try:
-        now = pd.to_datetime(time.ctime())
-        logging('Running bg_get_ml_recommendation')
-
-        # Calling ML Recommendations to the latest recommendation
-        # TODO: Set latest COPT call based on timestamp
-        q = f"""SELECT f_date_rec, f_value FROM {_DB_NAME_}.tb_bat_raw
-                WHERE f_address_no = "{config.TAG_COPT_ISCALLING}" """
-        copt_is_calling_timestamp, copt_is_calling = pd.read_sql(q, engine).values[0]
-        if not copt_is_calling:
-            logging('Calling COPT ...')
-            q = f"""UPDATE {_DB_NAME_}.tb_bat_raw
-                    SET f_value=1,f_date_rec=NOW(),f_updated_at=NOW()
-                    WHERE f_address_no='{config.TAG_COPT_ISCALLING}' """
-            with engine.connect() as conn: res = conn.execute(q)
-
-            url = f'http://{_LOCAL_IP_}/bat_combustion/{_UNIT_CODE_}/realtime'
-            logging(f"Calling COPT on URL: {url}")
-            response = requests.get(url)
-
-            q = f"""UPDATE {_DB_NAME_}.tb_bat_raw
-                    SET f_value=0,f_date_rec=NOW(),f_updated_at=NOW()
-                    WHERE f_address_no='{config.TAG_COPT_ISCALLING}' """
-            with engine.connect() as conn: res = conn.execute(q)
-
-            response_json = response.json()
-            if 'message' in response_json.keys(): logging(f"Received response: {response_json['message']}")
-            else: 
-                logging(f"Received response: {response.json()}")
-                response_json['message'] = ''
-            
-            res = response_json
-            ret['status'] = 'Success'
-            ret['message'] = res['message']
-            return ret
-        elif (now - copt_is_calling_timestamp) > pd.Timedelta('60sec'):
-            # Set back COPT_is_calling to 0 if last update > 60 sec ago.
-            message = "Set back COPT_is_calling to 0 cause a timeout."
-            logging(message)
-            q = f"""UPDATE {_DB_NAME_}.tb_bat_raw
-                    SET f_value=0,f_date_rec=NOW(),f_updated_at=NOW()
-                    WHERE f_address_no='{config.TAG_COPT_ISCALLING}' """
-            with engine.connect() as conn: res = conn.execute(q)
-            ret['status'] = 'Waiting'
-            ret['message'] = message
-    except Exception as e:
-        message = f'Machine learning prediction error: {traceback.format_exc()}'
-        logging(message)
-        ret['message'] = message
+        response = requests.get(f'http://{_LOCAL_IP_}:5002/bat_combustion/{_UNIT_CODE_}/realtime')
+        ret = response.json()
         return ret
+    except Exception as e:
+        logging(f"{time.ctime()} - Machine learning prediction error: {e}")
+        return str(e)
+
+def bg_model_runner():
+    while True:
+        bg_ml_runner()
+        time.sleep(db_config.COPT_BG_SLEEP_TIME)
+
+# def get_last_suggestions():
+#     oxy_desc = db_config.COPT_OXY_DESC
+#     pres_desc = db_config.COPT_PRES_DESC
+#
+#     q = f"""SELECT
+#                 tcmg.tag_name, tcmg.value, tcmg.ts
+#             FROM
+#                 tb_combustion_model_generation tcmg
+#             WHERE
+#                 tcmg.tag_name = 'SA Heater Out Press' OR tcmg.tag_name LIKE 'Excess Oxygen%'
+#                 AND tcmg.ts >= (
+#                 SELECT
+#                     f_last_update
+#                 FROM
+#                     tb_comb_constraint tcc
+#                 WHERE
+#                     tcc.f_constraint = '{db_config.COPT_ON}')
+#             ORDER BY
+#                 tcmg.ts DESC, tcmg.tag_name DESC
+#             LIMIT 2"""
+#     df = pd.read_sql(q, con)
+#     copt_dict = {}
+#
+#     for i in df.index:
+#         tag_name, tag_value, = df.iloc[i]
+#
+#         if (oxy_desc in tag_name):
+#             tag_name = db_config.COPT_OXY_IN
+#
+#         if (tag_name == pres_desc):
+#             tag_name = db_config.COPT_PRES_IN
+#
+#         copt_dict.update({tag_name: tag_value})
+#
+#     return copt_dict
+
+def get_last_suggestions():
+    # oxy_desc = db_config.COPT_OXY_DESC
+    # pres_desc = db_config.COPT_PRES_DESC
+    recom_oxy = get_constrain(db_config.RECOM_OXY)
+    recom_press = get_constrain(db_config.RECOM_PRESS)
+    recom_coal = get_constrain(db_config.RECOM_COAL)
+    q = f"""SELECT
+                tcmg.tag_name, tcmg.value, tcmg.ts
+            FROM
+                tb_combustion_model_generation tcmg
+            WHERE
+                tcmg.tag_name IN {(recom_oxy,recom_press)}
+                AND tcmg.ts >= (
+                SELECT
+                    f_last_update
+                FROM
+                    tb_comb_constraint tcc
+                WHERE
+                    tcc.f_int_id = '{db_config.COPT_ON}')
+            ORDER BY
+                tcmg.ts DESC, tcmg.tag_name DESC LIMIT 2"""
+    
+    df = pd.read_sql(q, con)
+    suggestions = []
+    tag_oxy = get_constrain(db_config.COPT_OXY_IN)
+    tag_press = get_constrain(db_config.COPT_PRES_IN)
+    tag_coal = get_constrain(db_config.COPT_COAL_IN)
+    
+    for i in df.index:
+        tag_name, tag_value, ts = df.iloc[i]
+        if tag_name == recom_oxy:
+            tag_name = tag_oxy
+            
+        if tag_name == recom_press:
+            tag_name = tag_press
+            
+        if tag_name == recom_coal:
+            tag_name = tag_coal
+        
+        suggestions.append({'tag':tag_name, 'value':tag_value, 'ts':ts})
+    
+    return suggestions
+
+def is_copt_lamp():
+    tag_lamp = get_constrain(db_config.COPT_LAMP_INDICATOR)
+    q = f"""SELECT
+            tbr.f_value
+        FROM
+            tb_bat_raw tbr
+        WHERE
+            tbr.f_address_no = '{tag_lamp}'"""
+    df = pd.read_sql(q, con)
+    
+    return True if df['f_value'].loc[0] == 'True' else False
+
+def is_permissive_bias():
+    tag_perm_bias = get_constrain(db_config.COPT_PERM_BIAS)
+    return get_tag_value(tag_perm_bias)
+
+# def update_permissive_bias():
+#     tag_perm_bias = get_constrain(db_config.COPT_PERM_BIAS)
+#     if is_copt_lamp():
+#         is_in_range = bg_is_permissive_bias_in_range()
+#         write_to_opc(tag_perm_bias, is_in_range)
+#         write_to_bat_raw(tag_perm_bias, is_in_range, 'Boolean')
+#     else:
+#         perm_bias = get_tag_value(tag_perm_bias)
+#         write_to_bat_raw(tag_perm_bias, 'False', 'Boolean')
+#         write_to_opc(tag_perm_bias, 'False')
+
+def update_permissive_bias():
+    tag_perm_bias = get_constrain(db_config.COPT_PERM_BIAS)
+    is_in_range = bg_is_permissive_bias_in_range()
+    copt_run = get_tag_value(get_constrain(db_config.COPT_LAMP_INDICATOR))
+    
+    if not copt_run:
+        is_in_range = False
+    
+    write_to_opc(tag_perm_bias, is_in_range)
+    write_to_bat_raw(tag_perm_bias, is_in_range, 'Boolean')
+
+def is_dcs_copt_enable_lamp():
+    return get_tag_value(get_constrain(db_config.COPT_LAMP_INDICATOR))
+
+def get_ml_last_run_time():
+    q = f"SELECT f_last_update FROM tb_comb_constraint tcc WHERE tcc.f_int_id = {db_config.CONSTRAIN_ID_ML_LAST_RUN}"
+    df = pd.read_sql(q, con)
+    
+    return df['f_last_update'].loc[0]
+
+def get_safeguard_detail():
+    q = f"""SELECT
+                rule.f_tag_sensor,
+                conf.f_description,
+                rule.f_bracket_open,
+                raw.f_value,
+                rule.f_bracket_close
+            FROM
+                {_DB_NAME_}.tb_combustion_rules_dtl rule
+            LEFT JOIN {_DB_NAME_}.tb_bat_raw raw ON
+                rule.f_tag_sensor = raw.f_address_no
+            LEFT JOIN {_DB_NAME_}.tb_combustion_rules_hdr hdr ON
+                rule.f_rule_hdr_id = hdr.f_rule_hdr_id
+            LEFT JOIN {_DB_NAME_}.tb_tags_read_conf conf ON 
+                rule.f_tag_sensor = conf.f_tag_name 
+            WHERE
+                hdr.f_rule_hdr_id = {db_config.RULE_SAFEGUARD}
+            ORDER BY
+                rule.f_sequence"""
+    df = pd.read_sql(q, con)
+    sg = df[['f_description','f_value','f_bracket_close','f_tag_sensor']]
+    alarm_desc = ''
+    alarm_set_value = ''
+    alarm_actual_value = ''
+    eval_string = ''
+    dcs_err = {}
+    
+    for i in sg.index:
+        description, raw_value, bracketClose, tag_name = sg.iloc[i]
+        try:
+            raw_value = round(float(raw_value),2)
+        except Exception as e:
+            print(e)
+        set_value = f"{bracketClose.lower().replace(' ','').replace(')','').replace('and','').replace('or','').replace('true','True').replace('false','False').replace('=','==')}"
+        rule = f"{raw_value}{bracketClose.lower().replace(' ','').replace(')','').replace('and','').replace('or','').replace('true','True').replace('false','False').replace('=','==')}"
+        eval_result = eval(rule)
+        
+        constraint, value = get_constrain_by_value(tag_name)
+        if 'or' in value or 'and' in value:
+            if eval_string == eval_string.replace(tag_name, str(eval_result)):
+                eval_string = ''
+                
+            if eval_string == '':
+                eval_string = value
+            
+            eval_string = eval_string.replace(tag_name, str(eval_result))
+            
+            try:
+                dcs_eval = eval(eval_string)
+                dcs_err.update({constraint: dcs_eval})
+            except Exception as e:
+                # do nothing
+                print('do nothing')
+        else:
+            dcs_err.update({constraint: eval_result})
+        
+        if not eval_result:
+            alarm_desc = f"{alarm_desc}{description}[{rule}] "
+            alarm_actual_value = f"{alarm_actual_value}{description} [{raw_value}] "
+            alarm_set_value = f"{alarm_set_value}{description} [{set_value}] "
+    
+    for i in dcs_err:
+        write_to_opc(i, dcs_err[i])
+        
+    return alarm_desc, alarm_set_value, alarm_actual_value
+
+def write_alarm(actual_value, desc, header, set_value=''):
+    try:
+        actual_value = round(float(actual_value),2)
+    except Exception as e:
+        print(e)
+    
+    q = f"""INSERT 
+                INTO tb_combustion_alarm_history (f_timestamp, f_actual_value, f_desc, f_rule_header, f_set_value) 
+                VALUE (NOW(), '{actual_value}', '{desc}', {header}, '{set_value}')"""
+    with engine.connect() as conn:
+            res = conn.execute(q)
+
+def is_safeguard():
+    tag_safeguard = get_constrain(db_config.SAFEGUARD_BAT)
+    return get_tag_value(tag_safeguard)
+
+def write_alarm_safeguard():
+    if not is_safeguard():
+        alarm_desc, set_value, actual_value = get_safeguard_detail()
+        
+        if actual_value:
+            write_alarm(actual_value, 'Safeguard: ' + alarm_desc, 20, set_value)
+
+def bg_alarm_runner():
+    # if is_copt_lamp():
+    #     write_alarm_safeguard()
+    # write_alarm_safeguard()    
+    write_copt_disable_alarm()
+    write_watchdog_alarm()
+    write_alarm_safeguard_details()
+
+g_already_write_copt_disable_alarm = 0
+def write_copt_disable_alarm():
+    global g_already_write_copt_disable_alarm
+    copt_ok = get_constrain(db_config.COPT_OK)
+    copt_ok_val = get_tag_value(copt_ok)
+    
+    if not copt_ok_val:
+        if g_already_write_copt_disable_alarm == 0:
+            write_alarm('', 'Status Disable COPT', 20, '')
+            g_already_write_copt_disable_alarm = 1
+    
+g_already_write_watchdog_alarm = 0        
+def write_watchdog_alarm():
+    global g_already_write_watchdog_alarm
+    watchdog = get_watchdog_indicator()
+    
+    if watchdog == '0' and g_already_write_watchdog_alarm == 0:
+        write_alarm('False', "Status Watchdog Failed", 20, 'True')
+        g_already_write_watchdog_alarm = 1
+    if watchdog == '1':
+        print('jangan masuk sini')
+        g_already_write_watchdog_alarm = 0
+
+def write_alarm_safeguard_details():
+    q = f"""SELECT
+                rule.f_tag_sensor,
+                conf.f_description,
+                rule.f_bracket_open,
+                raw.f_value,
+                rule.f_bracket_close
+            FROM
+                {_DB_NAME_}.tb_combustion_rules_dtl rule
+            LEFT JOIN {_DB_NAME_}.tb_bat_raw raw ON
+                rule.f_tag_sensor = raw.f_address_no
+            LEFT JOIN {_DB_NAME_}.tb_combustion_rules_hdr hdr ON
+                rule.f_rule_hdr_id = hdr.f_rule_hdr_id
+            LEFT JOIN {_DB_NAME_}.tb_tags_read_conf conf ON 
+                rule.f_tag_sensor = conf.f_tag_name 
+            WHERE
+                hdr.f_rule_hdr_id = {db_config.RULE_SAFEGUARD}
+            ORDER BY
+                rule.f_sequence"""
+    df = pd.read_sql(q, con)
+    sg = df[['f_description','f_value','f_bracket_close','f_tag_sensor']]
+    
+    for i in sg.index:
+        description, raw_value, bracketClose, tag_name = sg.iloc[i]
+        
+            
+        set_value = f"{bracketClose.lower().replace(' ','').replace(')','').replace('and','').replace('or','').replace('true','True').replace('false','False').replace('=','==')}"
+        rule = f"{raw_value}{bracketClose.lower().replace(' ','').replace(')','').replace('and','').replace('or','').replace('true','True').replace('false','False').replace('=','==')}"
+        eval_result = eval(rule)
+        
+        if not eval_result:
+            if bracketClose.__contains__('>'):
+                description += ' is LOW'
+            elif bracketClose.__contains__('<'):
+                description += ' is HIGH'
+            else:
+                description += ' is NOT OK' 
+            write_alarm(raw_value, description, 20, f"{tag_name}{set_value}")
+        else:
+            write_alarm(raw_value, description + ' is OK', 20, f"{tag_name}{set_value}")
+
+def get_watchdog_indicator():
+    q = f"""SELECT
+                f_default_value
+            FROM
+                tb_sootblow_control tsc
+            WHERE
+                tsc.f_control_id = {db_config.WATCHDOG_INDICATOR}"""
+    df = pd.read_sql(q, con)
+    return df['f_default_value'][0]    
+        
+def write_latest_o2_suggest():
+    tag_write = get_constrain(db_config.CONSTRAIN_O2_SUGGEST)
+    tag_read = get_constrain(db_config.RECOM_OXY)
+    
+    q = f"""SELECT
+                tcog.value
+            FROM
+                tb_combustion_model_generation tcog
+            WHERE
+                tcog.tag_name = '{tag_read}'
+            ORDER BY
+                tcog.ts DESC
+            LIMIT 1"""
+    
+    df = pd.read_sql(q, con)
+    
+    if df.shape[0] > 0:
+        tag_value = df['value'].loc[0]
+        write_to_bat_raw(tag_write, tag_value, 'Float')
+        
+def write_latest_press_suggest():
+    tag_write = get_constrain(db_config.CONSTRAIN_PRESS_SUGGEST)
+    tag_read = get_constrain(db_config.RECOM_PRESS)
+    
+    q = f"""SELECT
+                tcog.value
+            FROM
+                tb_combustion_model_generation tcog
+            WHERE
+                tcog.tag_name = '{tag_read}'
+            ORDER BY
+                tcog.ts DESC
+            LIMIT 1"""
+    
+    df = pd.read_sql(q, con)
+    
+    if df.shape[0] > 0:
+        tag_value = df['value'].loc[0]
+        write_to_bat_raw(tag_write, tag_value, 'Float')
+        
+def write_latest_coal_suggest():
+    tag_write = get_constrain(db_config.CONSTRAIN_COAL_SUGGEST)
+    tag_read = get_constrain(db_config.RECOM_COAL)
+    
+    q = f"""SELECT
+                tcog.value
+            FROM
+                tb_combustion_model_generation tcog
+            WHERE
+                tcog.tag_name = '{tag_read}'
+            ORDER BY
+                tcog.ts DESC
+            LIMIT 1"""
+    
+    df = pd.read_sql(q, con)
+    
+    if df.shape[0] > 0:
+        tag_value = df['value'].loc[0]
+        write_to_bat_raw(tag_write, tag_value, 'Float')
 
 def bg_ml_runner():
-    ENABLE_COPT = 0
-    MAX_BIAS_PERCENTAGE = 5
-    RECOM_EXEC_INTERVAL = 15
-    LATEST_RECOMMENDATION_TIME = pd.to_datetime('2020-01-01 00:00')
-
-    t0 = time.time()
-
-    # Get Enable status
-    q = f"""SELECT conf.f_description, raw.f_value FROM {_DB_NAME_}.tb_tags_read_conf conf
-            LEFT JOIN {_DB_NAME_}.tb_bat_raw raw
-            ON conf.f_tag_name = raw.f_address_no 
-            WHERE conf.f_description IN ("{config.DESC_ENABLE_COPT}",
-            "{config.DESC_ENABLE_COPT_BT}","{config.DESC_ENABLE_COPT_SEC}") """
-    df = pd.read_sql(q, engine).set_index('f_description')['f_value']
-    ENABLE_COPT = df[config.DESC_ENABLE_COPT]
-    ENABLE_COPT_BT = df[config.DESC_ENABLE_COPT_BT]
-    ENABLE_COPT_SEC = df[config.DESC_ENABLE_COPT_SEC]
-
-    # Get parameters
-    q = f"""SELECT f_label, f_default_value FROM {_DB_NAME_}.tb_combustion_parameters tcp 
-            WHERE f_label IN ("MAX_BIAS_PERCENTAGE","RECOM_EXEC_INTERVAL","DEBUG_MODE") """
-    parameters = pd.read_sql(q, engine).set_index('f_label')['f_default_value']
-
-    if 'MAX_BIAS_PERCENTAGE' in parameters.index:
-        MAX_BIAS_PERCENTAGE = float(parameters['MAX_BIAS_PERCENTAGE'])
-    if 'RECOM_EXEC_INTERVAL' in parameters.index:
-        RECOM_EXEC_INTERVAL = int(parameters['RECOM_EXEC_INTERVAL'])
-    if 'DEBUG_MODE' in parameters.index:
-        DEBUG_MODE = False if (str(int(parameters['DEBUG_MODE'])).lower() in ['0','false',0]) else True
+    step = 1
     
-    logging(f'DEBUG_MODE : {DEBUG_MODE}')
-    logging(f'COPT ENABLE: {bool(ENABLE_COPT)}')
-    
-    if DEBUG_MODE:
-        if ENABLE_COPT:
-            # Change DEBUG_MODE to False
-            logging(f"DEBUG_MODE is on, and COPT is on. Turning off DEBUG_MODE ...")
-            q = f"""UPDATE {_DB_NAME_}.tb_combustion_parameters
-                    SET f_default_value=0
-                    WHERE f_label="DEBUG_MODE";"""
-            with engine.connect() as conn: res = conn.execute(q)
+    while True:
+        if is_copt_lamp():
+            if step == 1:
+                step_call_suggestion()
+                write_latest_o2_suggest()
+                write_latest_press_suggest()
+                write_latest_coal_suggest()
+                step += 1
+                continue
+            if step == 2:
+                step_write_suggestion()
+                return
         else:
-            # Get latest recommendations time
-            q = f"""SELECT MAX(ts) FROM {_DB_NAME_}.tb_combustion_model_generation"""
-            df = pd.read_sql(q, engine)
-            try: LATEST_RECOMMENDATION_TIME = pd.to_datetime(df.values[0][0])
-            except Exception as e: logging(f"Error getting latest recommendation:", str(e)) 
-
-            # Return if latest recommendation is under RECOM_EXEC_INTERVAL minute
-            now = pd.to_datetime(time.ctime())
-            if (now - LATEST_RECOMMENDATION_TIME) < pd.Timedelta(f'{RECOM_EXEC_INTERVAL}min'):
-                return {'message':f"Waiting to next {LATEST_RECOMMENDATION_TIME + pd.Timedelta(f'{RECOM_EXEC_INTERVAL}min') - now} min"}
+            debug_mode = get_parameter_value(db_config.PARAM_DEBUG_MODE)
             
-            # Calling ML Recommendations to the latest recommendation
-            val = bg_get_ml_recommendation()
+            if debug_mode == 1:
+                step_call_suggestion_in_debug_mode()
+                write_latest_o2_suggest()
+                write_latest_press_suggest()
+                write_latest_coal_suggest()
+                step_write_o2_suggestion()
+           
+            return
 
-            if val['status'] == 'Success':
-                if not str(val['message']).startswith('Code 104'):
-                    # Sending values to OPC even with COPT turned off
-                    bg_write_recommendation_to_opc(MAX_BIAS_PERCENTAGE)
+# def bg_ml_runner():
+#     write_latest_o2_suggest()
+#     step = 1
+#
+#     while True:
+#         if is_copt_lamp():
+#             if step == 1:
+#                 step_call_suggestion()
+#                 step += 1
+#                 continue
+#             if step == 2:
+#                 step_write_suggestion()
+#                 return
+#         else:
+#             debug_mode = get_parameter_value(db_config.PARAM_DEBUG_MODE)
+#
+#             if debug_mode == 1:
+#                 step_call_suggestion_in_debug_mode() 
+#
+#             return
 
-            return {'message': f"Value: {val}"}
+def get_inrange_smallest_oxy():
+    tags = get_constrains([db_config.COPT_OXY_LEFT, db_config.COPT_OXY_RIGHT])
+    q = f"""SELECT
+            ttrc.f_description, 
+            tbr.f_address_no,
+            tbr.f_value
+        FROM
+            tb_bat_raw tbr
+        JOIN
+        tb_tags_read_conf ttrc ON
+            ttrc.f_tag_name = tbr.f_address_no
+        WHERE
+            tbr.f_address_no IN {tuple(tags)}"""
+    
+    df = pd.read_sql(q, con)
+    oxy_a = float(df['f_value'].loc[0])
+    oxy_b = float(df['f_value'].loc[1])
+    smallest_oxy = oxy_a
+    
+    if oxy_b < smallest_oxy:
+        smallest_oxy = oxy_b
+    
+    oxy_min = float(get_parameter_value(db_config.COPT_OXY_MIN))
+    oxy_max = float(get_parameter_value(db_config.COPT_OXY_MAX))
+    
+    if smallest_oxy >= oxy_min and smallest_oxy <= oxy_max:
+        return smallest_oxy
+    elif smallest_oxy > oxy_max:
+        return oxy_max - random()
+    else:
+        return oxy_min
 
-    elif ENABLE_COPT:
-        # Get latest recommendations time
-        q = f"""SELECT MAX(ts) FROM {_DB_NAME_}.tb_combustion_model_generation"""
-        df = pd.read_sql(q, engine)
-        try: LATEST_RECOMMENDATION_TIME = pd.to_datetime(df.values[0][0])
-        except Exception as e: logging(f"Error getting latest recommendation: {e}") 
+def write_smallest_pv_oxy():
+    if is_permissive_bias():
+        tag_oxy = get_constrain(db_config.COPT_OXY_PV_IN)
+        smallest_oxy = get_inrange_smallest_oxy()
+        write_to_opc(tag_oxy, smallest_oxy)
 
-        now = pd.to_datetime(time.ctime())
-        # TEMPORARY! 
-        if (now - LATEST_RECOMMENDATION_TIME) < pd.Timedelta(f'{RECOM_EXEC_INTERVAL}min'):
-            # TODO: make a smooth transition recommendation
-            logging(f"Last recommendation was {(now - LATEST_RECOMMENDATION_TIME)} ago. Sending recommendation values to OPC smoothly.")
-            try:
-                # Checking current O2 level
-                q = f"""SELECT raw.f_value FROM {_DB_NAME_}.cb_display disp
-                        LEFT JOIN {_DB_NAME_}.tb_bat_raw raw
-                        ON disp.f_tags = raw.f_address_no 
-                        WHERE disp.f_desc = "excess_o2" """
-                current_oxygen = pd.read_sql(q, engine).values[0][0]
-                # Latest recommendation
-                q = f"""SELECT gen.model_id, gen.ts, conf.f_tag_name, conf.f_description, 
-                        gen.value, gen.bias_value, gen.enable_status, gen.value - gen.bias_value AS 'current_value' 
-                        FROM {_DB_NAME_}.tb_tags_write_conf conf
-                        LEFT JOIN {_DB_NAME_}.tb_combustion_model_generation gen
-                        ON conf.f_description = gen.tag_name 
-                        WHERE gen.ts = (SELECT MAX(ts) FROM {_DB_NAME_}.tb_combustion_model_generation tcmg)"""
-                Recom = pd.read_sql(q, engine)
-                set_point_oxygen = float(Recom[Recom['f_description'] == 'Excess Oxygen Sensor']['value'])
-                if (abs(set_point_oxygen - current_oxygen) < config.OXYGEN_STEADY_STATE_LEVEL): 
-                    logging(f'Oxygen is in steady state level ({current_oxygen}).')
-                    return {'message': 'Oxygen is in steady state level.'}
-            except Exception as E:
-                logging(f"Error sending recommendation to opc! Error: {E}")
-            
-            # Write recommendation to OPC
-            bg_write_recommendation_to_opc(MAX_BIAS_PERCENTAGE)
-            return {'message':f"Waiting to next {LATEST_RECOMMENDATION_TIME + pd.Timedelta(f'{RECOM_EXEC_INTERVAL}min') - now} min"}
+def step_write_suggestion():
+    logging(f"Write latest recommendations to DCS")
+    suggestions = get_last_suggestions()
+    last_run = get_ml_last_run_time()
+    
+    for suggest in suggestions:
+        tag = suggest.get('tag')
+        value = suggest.get('value')
+        ts = suggest.get('ts')
         
-        else:
-            # Calling ML Recommendations to the latest recommendation
-            logging(f"Last recommendation was {(now - LATEST_RECOMMENDATION_TIME)} ago. Generating new ")
-            ML = bg_get_ml_recommendation()
+        if last_run != ts:
+            if is_permissive_bias():
+                logging(f"write suggestion {tag} {value}")
+                write_to_opc(tag, value)
+                update_comb_constrain(db_config.CONSTRAIN_ID_ML_LAST_RUN, 
+                                      db_config.CONSTRAIN_DESC_ML_LAST_RUN, ts)
+                
+def step_write_o2_suggestion():
+    logging(f"Write latest recommendations to DCS")
+    suggestions = get_last_suggestions()
+    # last_run = get_ml_last_run_time()
+    for suggest in suggestions:
+        tag = suggest.get('tag')
+        value = suggest.get('value')
+        
+        if tag == 'O2_SV2':
+            write_to_opc(tag, value)
+            # ts = suggest.get('ts')
+            
+            # if last_run != ts:
+                # logging(f"write suggestion {tag} {value}")
+                # update_comb_constrain(db_config.CONSTRAIN_ID_ML_LAST_RUN, 
+                #                       db_config.CONSTRAIN_DESC_ML_LAST_RUN, ts)
+                    
+        
 
-            if type(ML) is dict: 
-                if 'model_status' not in ML.keys():
-                    try:
-                        ML['model_status'] = int(bg_get_ml_model_status())
-                    except:
-                        return {'message':'Error on ML response. Columns "model_status" not found.'}
+# def step_write_suggestion():
+#     logging(f"Write latest recommendations to DCS")
+#     suggestions = get_last_suggestions()
+#
+#     if is_permissive_bias():
+#         last_run = get_ml_last_run_time()
+#
+#         for suggest in suggestions:
+#             tag = suggest.get('tag')
+#             value = suggest.get('value')
+#             ts = suggest.get('ts')
+#
+#             if last_run != ts:
+#                 logging(f"write suggestion {tag} {value}")
+#                 write_to_opc(tag, value)
+#                 update_comb_constrain(96, db_config.CONSTRAIN_DESC_ML_LAST_RUN, ts)
+            
 
-                elif ML['model_status'] == 1:
-                    try:
-                        bg_write_recommendation_to_opc(MAX_BIAS_PERCENTAGE)
-                    except Exception as e:
-                        return {'message': str(e)}
-                    return {'message':'Done!'}
+def step_call_suggestion():
+    if get_permissive_bias():
+        print(f"Calling ML API for recommendations")
+        bg_get_ml_recommendation()
+    else:
+        # write_alarm(str(perm_bias_alarm).replace('{','').replace('}','').replace('\'',''), 'COPT SUGGESTION FAIL: PERMISSIVE BIAS', 1)
+        write_alarm(str(perm_bias_alarm).replace('{','').replace('}','').replace('\'',''), 'Status Oxygen Bias Range Suggestion Failed', 1, 'Oxygen Bias Range 2% - 20%')
+        
+def step_call_suggestion_in_debug_mode():
+    if bg_is_permissive_bias_in_range():
+        print(f"Calling ML API for recommendations (debug_mode)")
+        bg_get_ml_recommendation()
+    else:
+        # write_alarm(str(perm_bias_alarm).replace('{','').replace('}','').replace('\'',''), 'COPT SUGGESTION FAIL: PERMISSIVE BIAS', 1)
+        write_alarm(str(perm_bias_alarm).replace('{','').replace('}','').replace('\'',''), 'Status Oxygen Bias Range Suggestion Failed', 1, 'Oxygen Bias Range 2% - 20%')
+    
+def get_permissive_bias():
+    tag_perm_bias = get_constrain(db_config.COPT_PERM_BIAS)
+    return get_tag_value(tag_perm_bias)
+            
+g_x2_o2_l = False
+g_x2_o2_r = False
+def bg_safeguard_dcs_indicator():
+    global g_x2_o2_l
+    global g_x2_o2_r
+    tags = get_constrains([db_config.COPT_OXY_LEFT, db_config.COPT_OXY_RIGHT])
+    sg_oxy_l = get_constrain(db_config.SG_OXY_L)
+    sg_oxy_r = get_constrain(db_config.SG_OXY_R)
+    total_count_oxy_left = 0
+    total_count_oxy_right = 0
+
+    while True:
+        counter_oxy_left = 0
+        counter_oxy_right = 0
+        time_start = time.time()
+
+        while(time.time() - time_start < 3):
+            query_rule_oxy_left = f"""
+                SELECT 
+                    tbr.f_value,
+                    f_bracket_close
+                FROM
+                    tb_combustion_rules_dtl tcrd
+                JOIN tb_bat_raw tbr ON
+                    tbr.f_address_no = tcrd.f_tag_sensor
+                WHERE
+                    tcrd.f_rule_hdr_id = 20
+                    AND tcrd.f_tag_sensor IN {tuple(tags)}
+                ORDER BY
+                    tcrd.f_tag_sensor ASC"""
+
+            df = pd.read_sql_query(query_rule_oxy_left, engine)
+            df_dict = df.astype(str).to_dict('records')
+            oxy_rule_left = df_dict[0]['f_value'] + df_dict[0]['f_bracket_close']
+            oxy_rule_left = oxy_rule_left.lower().replace(')','').replace('and','')
+            eval_oxy_left = eval(oxy_rule_left)
+
+            oxy_rule_right = df_dict[1]['f_value'] + df_dict[1]['f_bracket_close']
+            oxy_rule_right = oxy_rule_right.lower().replace(')','').replace('and','')
+            eval_oxy_right = eval(oxy_rule_right)
+
+            if eval_oxy_left:
+                total_count_oxy_left = 0
+                counter_oxy_left = 0
+                write_to_opc_exclude_history(sg_oxy_l, False)
+                g_x2_o2_l = False
             else:
-                return {'message': f"Error! Message: {ML}"}
+                counter_oxy_left += 1
 
-if _LOCAL_MODE_:
-    k = bg_ml_runner()
-    print(time.strftime('%X\t'), k)
+            if eval_oxy_right:
+                total_count_oxy_right = 0
+                counter_oxy_right = 0
+                write_to_opc_exclude_history(sg_oxy_r, False)
+                g_x2_o2_r = False
+            else:
+                counter_oxy_right += 1
+            time.sleep(0.5)
+
+        if counter_oxy_left > 0:
+            total_count_oxy_left += 1
+
+        if counter_oxy_right > 0:
+            total_count_oxy_right += 1
+
+        if total_count_oxy_left >= 3:
+            write_to_opc_exclude_history(sg_oxy_l, True)
+            g_x2_o2_l = True
+
+        if total_count_oxy_right >= 3:
+            write_to_opc_exclude_history(sg_oxy_r, True)
+            g_x2_o2_r = True
+
+def bg_maintain_x2_o2_true():
+    while True:
+        if not is_safeguard():
+            sg_oxy_l = get_constrain(db_config.SG_OXY_L)
+            sg_oxy_r = get_constrain(db_config.SG_OXY_R)
+            time.sleep(0.5)
+            
+            if g_x2_o2_l == True:
+                x2_o2_l = get_tag_value(sg_oxy_l)
+    
+                if x2_o2_l == False:
+                    write_to_opc(sg_oxy_l, True)
+            
+            if g_x2_o2_r == True:
+                x2_o2_r = get_tag_value(sg_oxy_r)
+    
+                if x2_o2_r == False:
+                    write_to_opc(sg_oxy_r, True)
+        else:
+            time.sleep(1)
+
+def bg_maintain_x2_o2l_true():
+    while True:
+        if not is_safeguard():
+            sg_oxy_l = get_constrain(db_config.SG_OXY_L)
+            
+            if g_x2_o2_l == True:
+                time.sleep(0.75)
+                x2_o2_l = get_tag_value(sg_oxy_l)
+    
+                if x2_o2_l == False:
+                    write_to_opc(sg_oxy_l, True)
+        else:
+            time.sleep(1)
+
+def bg_maintain_x2_o2r_true():
+    while True:
+        if not is_safeguard():
+            sg_oxy_r = get_constrain(db_config.SG_OXY_R)
+            
+            if g_x2_o2_r == True:
+                time.sleep(0.75)
+                x2_o2_r = get_tag_value(sg_oxy_r)
+    
+                if x2_o2_r == False:
+                    write_to_opc(sg_oxy_r, True)
+        else:
+            time.sleep(1)
+            
+# g_x2_o2_l = False
+# g_x2_o2_r = False
+# def bg_safeguard_dcs_indicator():
+#     global g_x2_o2_l
+#     global g_x2_o2_r
+#     tags = get_constrains([db_config.COPT_OXY_LEFT, db_config.COPT_OXY_RIGHT])
+#     sg_oxy_l = get_constrain(db_config.SG_OXY_L)
+#     sg_oxy_r = get_constrain(db_config.SG_OXY_R)
+#     total_count_oxy_left = 0
+#     total_count_oxy_right = 0
+#
+#     while True:
+#         param_skip_dcs_sg_indicator = get_copt_parameter(db_config.PARAM_SKIP_DCS_SG_INDICATOR)
+#
+#         if param_skip_dcs_sg_indicator == 1:
+#             time.sleep(5)
+#         else:
+#             counter_oxy_left = 0
+#             counter_oxy_right = 0
+#             time_start = time.time()
+#
+#             while(time.time() - time_start < 3):
+#                 query_rule_oxy_left = f"""
+#                     SELECT 
+#                         tbr.f_value,
+#                         f_bracket_close
+#                     FROM
+#                         tb_combustion_rules_dtl tcrd
+#                     JOIN tb_bat_raw tbr ON
+#                         tbr.f_address_no = tcrd.f_tag_sensor
+#                     WHERE
+#                         tcrd.f_rule_hdr_id = 20
+#                         AND tcrd.f_tag_sensor IN {tuple(tags)}
+#                     ORDER BY
+#                         tcrd.f_tag_sensor ASC"""
+#
+#                 df = pd.read_sql_query(query_rule_oxy_left, engine)
+#                 df_dict = df.astype(str).to_dict('records')
+#                 oxy_rule_left = df_dict[0]['f_value'] + df_dict[0]['f_bracket_close']
+#                 oxy_rule_left = oxy_rule_left.lower().replace(')','').replace('and','')
+#                 eval_oxy_left = eval(oxy_rule_left)
+#
+#                 oxy_rule_right = df_dict[1]['f_value'] + df_dict[1]['f_bracket_close']
+#                 oxy_rule_right = oxy_rule_right.lower().replace(')','').replace('and','')
+#                 eval_oxy_right = eval(oxy_rule_right)
+#
+#                 if eval_oxy_left:
+#                     total_count_oxy_left = 0
+#                     counter_oxy_left = 0
+#                     write_to_opc(sg_oxy_l, False)
+#                     g_x2_o2_l = False
+#                 else:
+#                     counter_oxy_left += 1
+#
+#                 if eval_oxy_right:
+#                     total_count_oxy_right = 0
+#                     counter_oxy_right = 0
+#                     write_to_opc(sg_oxy_r, False)
+#                     g_x2_o2_r = False
+#                 else:
+#                     counter_oxy_right += 1
+#                 time.sleep(0.5)
+#
+#             if counter_oxy_left > 0:
+#                 total_count_oxy_left += 1
+#
+#             if counter_oxy_right > 0:
+#                 total_count_oxy_right += 1
+#
+#             if total_count_oxy_left >= 3:
+#                 write_to_opc(sg_oxy_l, True)
+#                 g_x2_o2_l = True
+#
+#             if total_count_oxy_right >= 3:
+#                 write_to_opc(sg_oxy_r, True)
+#                 g_x2_o2_r = True
+#
+# def bg_maintain_x2_o2l_true():
+#     while True:
+#         param_skip_dcs_sg_indicator = get_copt_parameter(db_config.PARAM_SKIP_DCS_SG_INDICATOR)
+#         sg_oxy_l = get_constrain(db_config.SG_OXY_L)
+#
+#         if param_skip_dcs_sg_indicator == 1:
+#             time.sleep(5)
+#         else:
+#             if g_x2_o2_l == True:
+#                 time.sleep(0.5)
+#                 x2_o2_l = get_tag_value(sg_oxy_l)
+#
+#                 if x2_o2_l == False:
+#                     write_to_opc(sg_oxy_l, True)
+#
+# def bg_maintain_x2_o2r_true():
+#     while True:
+#         param_skip_dcs_sg_indicator = get_copt_parameter(db_config.PARAM_SKIP_DCS_SG_INDICATOR)
+#         sg_oxy_r = get_constrain(db_config.SG_OXY_R)
+#
+#         if param_skip_dcs_sg_indicator == 1:
+#             time.sleep(5)
+#         else:
+#             if g_x2_o2_r == True:
+#                 time.sleep(0.5)
+#                 x2_o2_r = get_tag_value(sg_oxy_r)
+#
+#                 if x2_o2_r == False:
+#                     write_to_opc(sg_oxy_r, True)
+                    
+            
+        
+    
+

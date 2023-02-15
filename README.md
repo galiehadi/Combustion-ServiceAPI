@@ -1,9 +1,12 @@
 # ServiceAPI
-Managing background services with API from Flask
+## Overview
+Managing background services with API from Flask. This API handles the background services for Combustion Optimization and for UI backend.
+
+
 
 ## Updates:
 
-> **Update v1.5.4**
+> **Update v1.3**
 >
-> Removing limit on downloading Recommendation, adding editing description on alarm-history
-> Fixing bugs on alarm-history
+> Adding individual safeguard to show on the UI.
+> Adding the safeguard feature with counter.
