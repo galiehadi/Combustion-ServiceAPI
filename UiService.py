@@ -73,7 +73,7 @@ def get_o2_converter_parameters():
         return [1, 0]
 
 def get_comb_tags():
-    q = f"""SELECT cd.f_desc, cd.f_data_type, tbr.f_value, cd.f_units FROM {_DB_NAME_}.cb_display cd 
+    q = f"""SELECT cd.f_desc, tbr.f_data_type, tbr.f_value, cd.f_units FROM {_DB_NAME_}.cb_display cd 
             LEFT JOIN {_DB_NAME_}.tb_bat_raw tbr 
             ON cd.f_tags = tbr.f_address_no 
             ORDER BY cd.f_desc ASC"""
@@ -222,8 +222,8 @@ def get_all_rules_detailed():
 def get_tags_rule():
     q = f"""SELECT "" AS tagKKS, f_tag_name AS tagSensor, 
             f_description AS tagDescription FROM tb_tags_read_conf ttrc 
-            WHERE f_tag_use IN ("COPT", "SOPT+COPT", "COPT+SOPT")
-            AND f_is_active != 0"""
+            WHERE /*f_tag_use IN ("COPT", "SOPT+COPT", "COPT+SOPT")
+            AND*/ f_is_active != 0"""
     df = pd.read_sql(q, engine)
     df['tagDescription'] = [f.strip() for f in df['tagDescription'].astype(str)]
     df['tagDescription'] = df['tagSensor'] + ' -- ' + df['tagDescription']
@@ -350,7 +350,7 @@ def post_alarm(payload):
     }
     for key in ['alarmId', 'desc']:
         if key not in payload.keys(): 
-            ret['Message']: f"Key `{key}` not in payload."
+            ret['Message']= f"Key `{key}` not in payload."
             return ret
     
     q = f"""UPDATE tb_combustion_alarm_history

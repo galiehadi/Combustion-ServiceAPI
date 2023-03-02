@@ -202,10 +202,10 @@ def bg_combustion_watchdog_check():
     q = f"""SELECT conf.f_description, raw.f_value FROM tb_bat_raw raw
             LEFT JOIN tb_tags_read_conf conf
             ON conf.f_tag_name = raw.f_address_no 
-            WHERE conf.f_description = "COMBUSTION ENABLE"
+            WHERE conf.f_description = "{config.DESC_ENABLE_COPT}"
             UNION 
             SELECT raw.f_address_no, raw.f_value FROM tb_bat_raw raw
-            WHERE f_address_no = "WatchdogStatus" """
+            WHERE f_address_no = "{config.WATCHDOG_TAG}" """
     DF = pd.read_sql(q, engine)
     DF = DF.set_index('f_description')['f_value']
     Watchdog_status = int(DF[config.WATCHDOG_TAG])
@@ -225,15 +225,17 @@ def bg_combustion_watchdog_check():
             Alarm = pd.DataFrame(Alarm, columns=["f_timestamp", "f_desc", "f_set_value", "f_actual_value", "f_rule_header"])
             Alarm.to_sql('tb_combustion_alarm_history', engine, if_exists='append', index=False)
 
-            q = f"""SELECT f_tag_name FROM tb_tags_write_conf
+            q = f"""SELECT f_tag_name FROM tb_tags_read_conf
                     WHERE f_description = "Combustion Alarm" """
             alarm_tag = pd.read_sql(q, engine).values[0][0]
 
             opc_write = [[alarm_tag, pd.to_datetime('now'), 101]]
             opc_write = pd.DataFrame(opc_write, columns=['tag_name','ts','value'])
 
-            opc_write.to_sql('tb_opc_write_copt', engine, if_exists='append', index=False)
-            opc_write.to_sql('tb_opc_write_history_copt', engine, if_exists='append', index=False)
+            # opc_write.to_sql('tb_opc_write_copt', engine, if_exists='append', index=False)
+            # opc_write.to_sql('tb_opc_write_history_copt', engine, if_exists='append', index=False)
+            opc_write.to_sql('tb_opc_write', engine, if_exists='append', index=False)
+            opc_write.to_sql('tb_opc_write_history', engine, if_exists='append', index=False)
         except Exception as E:
             logging(f"Failed to turn off COPT: {E}")
     
@@ -310,8 +312,10 @@ def bg_safeguard_update():
             opc_write = [[o2_recom_tag, ts, o2_bias]]
             opc_write = pd.DataFrame(opc_write, columns=['tag_name','ts','value'])
             
-            opc_write.to_sql('tb_opc_write_copt', engine, if_exists='append', index=False)
-            opc_write.to_sql('tb_opc_write_history_copt', engine, if_exists='append', index=False)
+            # opc_write.to_sql('tb_opc_write_copt', engine, if_exists='append', index=False)
+            # opc_write.to_sql('tb_opc_write_history_copt', engine, if_exists='append', index=False)
+            opc_write.to_sql('tb_opc_write', engine, if_exists='append', index=False)
+            opc_write.to_sql('tb_opc_write_history', engine, if_exists='append', index=False)
 
             # Append alarm history
             Alarms = S_COPT['Individual Alarm']
@@ -335,8 +339,12 @@ def bg_safeguard_update():
                 pass 
 
             # Write alarm 102 to DCS 
-            q = f"""SELECT * FROM tb_opc_write_copt
-                WHERE tag_name = (SELECT f_tag_name AS tag_name FROM {_DB_NAME_}.tb_tags_write_conf ttwc 
+            # q = f"""SELECT * FROM tb_opc_write_copt
+            #     WHERE tag_name = (SELECT f_tag_name AS tag_name FROM {_DB_NAME_}.tb_tags_write_conf ttwc 
+            #     WHERE f_description = "{config.DESC_ALARM}")
+            #     ORDER BY ts DESC LIMIT 10 """
+            q = f"""SELECT * FROM tb_opc_write
+                WHERE tag_name = (SELECT f_tag_name AS tag_name FROM {_DB_NAME_}.tb_tags_read_conf ttwc 
                 WHERE f_description = "{config.DESC_ALARM}")
                 ORDER BY ts DESC LIMIT 10 """
             Latest_OPC_alarm = pd.read_sql(q, engine)
@@ -347,17 +355,24 @@ def bg_safeguard_update():
                     raise(ValueError(f"""Alarm has been executed on "{Latest_OPC_alarm_timestamp}". Waiting on OPC Writers to execute. """))
             
             # Force truncate opc write and re-disable COPT
-            q = f"""SELECT COUNT(*) FROM tb_opc_write_copt"""
+            # q = f"""SELECT COUNT(*) FROM tb_opc_write_copt"""
+            q = f"""SELECT COUNT(*) FROM tb_opc_write"""
             opc_write_count = pd.read_sql(q, engine).values[0][0]
             
             with engine.connect() as conn:
                 if opc_write_count > 15:
-                    q = f"TRUNCATE tb_opc_write_copt"
+                    # q = f"TRUNCATE tb_opc_write_copt"
+                    q = f"TRUNCATE tb_opc_write"
                     conn.execute()
                     
-                for table in ['tb_opc_write_copt','tb_opc_write_history_copt']:
+                # for table in ['tb_opc_write_copt','tb_opc_write_history_copt']:
+                #     q = f"""INSERT IGNORE INTO {_DB_NAME_}.{table}
+                #             SELECT f_tag_name AS tag_name, NOW() AS ts, 102 AS value FROM {_DB_NAME_}.tb_tags_write_conf ttwc 
+                #             WHERE f_description = "{config.DESC_ALARM}" """
+                #     conn.execute(q)
+                for table in ['tb_opc_write','tb_opc_write_history']:
                     q = f"""INSERT IGNORE INTO {_DB_NAME_}.{table}
-                            SELECT f_tag_name AS tag_name, NOW() AS ts, 102 AS value FROM {_DB_NAME_}.tb_tags_write_conf ttwc 
+                            SELECT f_tag_name AS tag_name, NOW() AS ts, 102 AS value FROM {_DB_NAME_}.tb_tags_read_conf ttwc 
                             WHERE f_description = "{config.DESC_ALARM}" """
                     conn.execute(q)
                     
@@ -367,8 +382,13 @@ def bg_safeguard_update():
     if copt_safeguard_status:
         # Checking last alarm
         try:
-            q = f"""SELECT value FROM {_DB_NAME_}.tb_opc_write_history_copt
-                    WHERE tag_name = (SELECT conf.f_tag_name FROM {_DB_NAME_}.tb_tags_write_conf conf
+            # q = f"""SELECT value FROM {_DB_NAME_}.tb_opc_write_history_copt
+            #         WHERE tag_name = (SELECT conf.f_tag_name FROM {_DB_NAME_}.tb_tags_write_conf conf
+            #                         WHERE f_description = "{config.DESC_ALARM}")
+            #         ORDER BY ts DESC
+            #         LIMIT 1"""
+            q = f"""SELECT value FROM {_DB_NAME_}.tb_opc_write_history
+                    WHERE tag_name = (SELECT conf.f_tag_name FROM {_DB_NAME_}.tb_tags_read_conf conf
                                     WHERE f_description = "{config.DESC_ALARM}")
                     ORDER BY ts DESC
                     LIMIT 1"""
@@ -377,9 +397,14 @@ def bg_safeguard_update():
             else: alarm_current_status = 102
             if alarm_current_status != 100:
                 # Write back alarm 100 to DCS 
-                for table in ['tb_opc_write_copt','tb_opc_write_history_copt']:
+                # for table in ['tb_opc_write_copt','tb_opc_write_history_copt']:
+                #     q = f"""INSERT IGNORE INTO {_DB_NAME_}.{table}
+                #             SELECT f_tag_name AS tag_name, NOW() AS ts, 100 AS value FROM {_DB_NAME_}.tb_tags_write_conf ttwc 
+                #             WHERE f_description = "{config.DESC_ALARM}" """
+                #     with engine.connect() as conn: res = conn.execute(q)
+                for table in ['tb_opc_write','tb_opc_write_history']:
                     q = f"""INSERT IGNORE INTO {_DB_NAME_}.{table}
-                            SELECT f_tag_name AS tag_name, NOW() AS ts, 100 AS value FROM {_DB_NAME_}.tb_tags_write_conf ttwc 
+                            SELECT f_tag_name AS tag_name, NOW() AS ts, 100 AS value FROM {_DB_NAME_}.tb_tags_read_conf ttwc 
                             WHERE f_description = "{config.DESC_ALARM}" """
                     with engine.connect() as conn: res = conn.execute(q)
                 logging(f'Write to OPC: {config.DESC_ALARM}: 102 changed to 100')
@@ -407,7 +432,7 @@ def bg_write_recommendation_to_opc(MAX_BIAS_PERCENTAGE):
     Enable_status_df = Enable_status_df.replace(np.nan, 0)
 
     # Enable tags
-    q = f"""SELECT f_category, f_description, f_tag_name FROM {_DB_NAME_}.tb_tags_write_conf
+    q = f"""SELECT f_category, f_description, f_tag_name FROM {_DB_NAME_}.tb_tags_read_conf
             WHERE f_tag_use = "COPT"
             AND f_is_active = 1 """
     Write_tags = pd.read_sql(q, engine)
@@ -425,7 +450,7 @@ def bg_write_recommendation_to_opc(MAX_BIAS_PERCENTAGE):
     q = f"""SELECT gen.model_id, gen.ts, conf.f_tag_name, conf.f_description, gen.value, gen.bias_value, gen.enable_status, 
             gen.value - gen.bias_value AS current_value
             FROM tb_combustion_model_generation gen
-            LEFT JOIN tb_tags_write_conf conf 
+            LEFT JOIN tb_tags_read_conf conf 
             ON gen.tag_name = conf.f_description 
             WHERE gen.ts = (SELECT MAX(ts) FROM tb_combustion_model_generation gen)
             GROUP BY conf.f_description """
@@ -492,8 +517,10 @@ def bg_write_recommendation_to_opc(MAX_BIAS_PERCENTAGE):
     #         tags = Enable_status[C]['tag_lists']
     #         opc_write = opc_write.drop(index = opc_write[opc_write['tag_name'].isin(tags)].index)
     
-    opc_write.to_sql('tb_opc_write_copt', engine, if_exists='append', index=False)
-    opc_write.to_sql('tb_opc_write_history_copt', engine, if_exists='append', index=False)
+    # opc_write.to_sql('tb_opc_write_copt', engine, if_exists='append', index=False)
+    # opc_write.to_sql('tb_opc_write_history_copt', engine, if_exists='append', index=False)
+    opc_write.to_sql('tb_opc_write', engine, if_exists='append', index=False)
+    opc_write.to_sql('tb_opc_write_history', engine, if_exists='append', index=False)
     logging(f'Write to OPC: \n{opc_write}\n')
     return 'Done!'
     
@@ -511,7 +538,7 @@ def bg_write_recommendation_to_opc1(MAX_BIAS_PERCENTAGE):
     Enable_status_df = Enable_status_df.replace(np.nan, 0)
 
     # Enable tags
-    q = f"""SELECT f_category, f_description, f_tag_name FROM {_DB_NAME_}.tb_tags_write_conf
+    q = f"""SELECT f_category, f_description, f_tag_name FROM {_DB_NAME_}.tb_tags_read_conf
             WHERE f_tag_use = "COPT" """
     Write_tags = pd.read_sql(q, engine)
     Write_tags
@@ -571,8 +598,10 @@ def bg_write_recommendation_to_opc1(MAX_BIAS_PERCENTAGE):
             tags = Enable_status[C]['tag_lists']
             opc_write = opc_write.drop(index = opc_write[opc_write['tag_name'].isin(tags)].index)
     
-    opc_write.to_sql('tb_opc_write_copt', engine, if_exists='append', index=False)
-    opc_write.to_sql('tb_opc_write_history_copt', engine, if_exists='append', index=False)
+    # opc_write.to_sql('tb_opc_write_copt', engine, if_exists='append', index=False)
+    # opc_write.to_sql('tb_opc_write_history_copt', engine, if_exists='append', index=False)
+    opc_write.to_sql('tb_opc_write', engine, if_exists='append', index=False)
+    opc_write.to_sql('tb_opc_write_history', engine, if_exists='append', index=False)
     logging(f'Write to OPC: {opc_write}')
     return 'Done!'
 
@@ -660,9 +689,9 @@ def bg_ml_runner():
             "{config.DESC_ENABLE_COPT_BT}","{config.DESC_ENABLE_COPT_SEC}") """
     df = pd.read_sql(q, engine).set_index('f_description')['f_value']
     ENABLE_COPT = df[config.DESC_ENABLE_COPT]
-    ENABLE_COPT_BT = df[config.DESC_ENABLE_COPT_BT]
-    ENABLE_COPT_SEC = df[config.DESC_ENABLE_COPT_SEC]
-
+    ENABLE_COPT_BT = df[config.DESC_ENABLE_COPT_BT] if config.DESC_ENABLE_COPT_BT in df.index else 0
+    ENABLE_COPT_SEC = df[config.DESC_ENABLE_COPT_SEC] if config.DESC_ENABLE_COPT_SEC in df.index else 0
+ 
     # Get parameters
     q = f"""SELECT f_label, f_default_value FROM {_DB_NAME_}.tb_combustion_parameters tcp 
             WHERE f_label IN ("MAX_BIAS_PERCENTAGE","RECOM_EXEC_INTERVAL","DEBUG_MODE") """
@@ -730,7 +759,7 @@ def bg_ml_runner():
                 # Latest recommendation
                 q = f"""SELECT gen.model_id, gen.ts, conf.f_tag_name, conf.f_description, 
                         gen.value, gen.bias_value, gen.enable_status, gen.value - gen.bias_value AS 'current_value' 
-                        FROM {_DB_NAME_}.tb_tags_write_conf conf
+                        FROM {_DB_NAME_}.tb_tags_read_conf conf
                         LEFT JOIN {_DB_NAME_}.tb_combustion_model_generation gen
                         ON conf.f_description = gen.tag_name 
                         WHERE gen.ts = (SELECT MAX(ts) FROM {_DB_NAME_}.tb_combustion_model_generation tcmg)"""
