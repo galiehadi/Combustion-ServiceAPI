@@ -172,6 +172,7 @@ def get_alarm_history(page=0, limit=40, payload=None, download=False):
     df = pd.read_sql(q, engine)
     if download:
         return save_to_path(df)
+    df['actualValue'] = df['actualValue'].astype(float).round(2)
     df_dict = df.astype(str).to_dict('records')
     return df_dict
 
