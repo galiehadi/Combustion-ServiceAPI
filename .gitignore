@@ -128,12 +128,5 @@ dmypy.json
 # Pyre type checker
 .pyre/
 rekap status tag sehari.ipynb
-test.ipynb
-data/Rekap tags good TJA2.csv
-data/temp/COPT-download-2022-06-26 154054.xlsx
-data/temp/COPT-download-2022-06-26 154142.xlsx
-data/temp/COPT-download-2022-06-26 154215.xlsx
-data/temp/COPT-download-2022-06-26 161711.xlsx
-src/2022-05-12 09 25 BAT_1 weather_information.csv
-src/Weather Information - Resample 1H.csv
-src/Weather Information.csv
+*.ipynb
+temp/*

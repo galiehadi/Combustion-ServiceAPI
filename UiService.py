@@ -172,6 +172,7 @@ def get_alarm_history(page=0, limit=40, payload=None, download=False):
     df = pd.read_sql(q, engine)
     if download:
         return save_to_path(df)
+    df['actualValue'] = df['actualValue'].astype(float).round(3)
     df_dict = df.astype(str).to_dict('records')
     return df_dict
 
@@ -222,8 +223,7 @@ def get_all_rules_detailed():
 def get_tags_rule():
     q = f"""SELECT "" AS tagKKS, f_tag_name AS tagSensor, 
             f_description AS tagDescription FROM tb_tags_read_conf ttrc 
-            WHERE /*f_tag_use IN ("COPT", "SOPT+COPT", "COPT+SOPT")
-            AND*/ f_is_active != 0"""
+            WHERE f_is_active != 0"""
     df = pd.read_sql(q, engine)
     df['tagDescription'] = [f.strip() for f in df['tagDescription'].astype(str)]
     df['tagDescription'] = df['tagSensor'] + ' -- ' + df['tagDescription']
@@ -331,11 +331,11 @@ def post_parameter(payload):
     defaultValue = payload['value']
 
     q = f"""INSERT INTO
-			{_DB_NAME_}.tb_combustion_parameters (f_parameter_id,f_label,f_default_value,f_is_active,f_updated_at)
+            {_DB_NAME_}.tb_combustion_parameters (f_parameter_id,f_label,f_default_value,f_is_active,f_updated_at)
             VALUES ({parameterID},'{label}',{defaultValue},1,NOW());
          """
     qdel = f"""DELETE FROM {_DB_NAME_}.tb_combustion_parameters
-	           WHERE f_parameter_id={parameterID}"""
+               WHERE f_parameter_id={parameterID}"""
 
     with engine.connect() as conn:
         red = conn.execute(qdel)

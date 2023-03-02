@@ -1,7 +1,7 @@
 """
 Setting parameter untuk koneksi ke database.
 """
-__version__ = 'v1.5.4'
+__version__ = 'v1.5.5'
 
 _UNIT_CODE_ = "PCT1"
 _UNIT_NAME_ = "PLTU Pacitan 1"
@@ -17,11 +17,11 @@ WATCHDOG_TAG = "OPC.AW1002.1LSB.WATCHDOG_STS.BO02"
 SAFEGUARD_TAG = "SAFEGUARD:COMBUSTION"
 SAFEGUARD_SOPT_TAG = "SAFEGUARD:SOOTBLOW"
 
-DESC_ENABLE_COPT = "Tag Enable COPT"
+DESC_ENABLE_COPT = "COPT RUNNING STATUS"
 DESC_ENABLE_COPT_BT = "BURN TILT ENABLE"
 DESC_ENABLE_COPT_SEC = "SEC AIR ENABLE"
 DESC_ENABLE_COPT_MOT = "MILL OUTLET ENABLE"
-DESC_ALARM = "Combustion Alarm"
+DESC_ALARM = "SAFEGUARD FAIL ALARM"
 
 TAG_COPT_ISCALLING = "TAG:COPT_is_calling"
 OXYGEN_STEADY_STATE_LEVEL = 0.01
@@ -33,7 +33,7 @@ PARAMETER_WRITE = {
     'All Wind': PARAMETER_BIAS,
     'Burner Tilt Position Lower': PARAMETER_BIAS,
     'Burner Tilt Position Upper': PARAMETER_BIAS,
-    'Excess Oxygen Sensor': PARAMETER_SET_POINT,
+    'Excess Oxygen Sensor': PARAMETER_BIAS,
     'Mill A Outlet Temperature': PARAMETER_SET_POINT,
     'Mill B Outlet Temperature': PARAMETER_SET_POINT,
     'Mill C Outlet Temperature': PARAMETER_SET_POINT,

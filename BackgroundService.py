@@ -132,7 +132,7 @@ def bg_combustion_safeguard_check():
             individualValues = {
                 'sequence': i,
                 'setValue': setValue, 
-                'actualValue': value,
+                'actualValue': round(float(value),3),
                 'tagDescription': description.strip(),
                 'status': eval(individualRule)
             }
@@ -232,10 +232,8 @@ def bg_combustion_watchdog_check():
             opc_write = [[alarm_tag, pd.to_datetime('now'), 101]]
             opc_write = pd.DataFrame(opc_write, columns=['tag_name','ts','value'])
 
-            # opc_write.to_sql('tb_opc_write_copt', engine, if_exists='append', index=False)
-            # opc_write.to_sql('tb_opc_write_history_copt', engine, if_exists='append', index=False)
-            opc_write.to_sql('tb_opc_write', engine, if_exists='append', index=False)
-            opc_write.to_sql('tb_opc_write_history', engine, if_exists='append', index=False)
+            opc_write.to_sql('tb_opc_write_copt', engine, if_exists='append', index=False)
+            # opc_write.to_sql('tb_opc_write_history', engine, if_exists='append', index=False)
         except Exception as E:
             logging(f"Failed to turn off COPT: {E}")
     
@@ -307,15 +305,13 @@ def bg_safeguard_update():
             
             # Revert all changes
             copt_enable = df[COPTenable_name].max()
-            o2_bias = o2_current - DCS_O2.predict(mw_current)
+            o2_bias = o2_current #- DCS_O2.predict(mw_current)
 
             opc_write = [[o2_recom_tag, ts, o2_bias]]
             opc_write = pd.DataFrame(opc_write, columns=['tag_name','ts','value'])
             
-            # opc_write.to_sql('tb_opc_write_copt', engine, if_exists='append', index=False)
-            # opc_write.to_sql('tb_opc_write_history_copt', engine, if_exists='append', index=False)
             opc_write.to_sql('tb_opc_write', engine, if_exists='append', index=False)
-            opc_write.to_sql('tb_opc_write_history', engine, if_exists='append', index=False)
+            # opc_write.to_sql('tb_opc_write_history', engine, if_exists='append', index=False)
 
             # Append alarm history
             Alarms = S_COPT['Individual Alarm']
@@ -339,6 +335,7 @@ def bg_safeguard_update():
                 pass 
 
             # Write alarm 102 to DCS 
+            # TODO: To be determined the alarm rules
             # q = f"""SELECT * FROM tb_opc_write_copt
             #     WHERE tag_name = (SELECT f_tag_name AS tag_name FROM {_DB_NAME_}.tb_tags_write_conf ttwc 
             #     WHERE f_description = "{config.DESC_ALARM}")
@@ -355,26 +352,18 @@ def bg_safeguard_update():
                     raise(ValueError(f"""Alarm has been executed on "{Latest_OPC_alarm_timestamp}". Waiting on OPC Writers to execute. """))
             
             # Force truncate opc write and re-disable COPT
-            # q = f"""SELECT COUNT(*) FROM tb_opc_write_copt"""
-            q = f"""SELECT COUNT(*) FROM tb_opc_write"""
+            q = f"""SELECT COUNT(*) FROM tb_opc_write_copt"""
             opc_write_count = pd.read_sql(q, engine).values[0][0]
             
             with engine.connect() as conn:
                 if opc_write_count > 15:
-                    # q = f"TRUNCATE tb_opc_write_copt"
-                    q = f"TRUNCATE tb_opc_write"
+                    q = f"TRUNCATE tb_opc_write_copt"
                     conn.execute()
-                    
-                # for table in ['tb_opc_write_copt','tb_opc_write_history_copt']:
-                #     q = f"""INSERT IGNORE INTO {_DB_NAME_}.{table}
-                #             SELECT f_tag_name AS tag_name, NOW() AS ts, 102 AS value FROM {_DB_NAME_}.tb_tags_write_conf ttwc 
-                #             WHERE f_description = "{config.DESC_ALARM}" """
-                #     conn.execute(q)
-                for table in ['tb_opc_write','tb_opc_write_history']:
-                    q = f"""INSERT IGNORE INTO {_DB_NAME_}.{table}
-                            SELECT f_tag_name AS tag_name, NOW() AS ts, 102 AS value FROM {_DB_NAME_}.tb_tags_read_conf ttwc 
-                            WHERE f_description = "{config.DESC_ALARM}" """
-                    conn.execute(q)
+
+                q = f"""INSERT IGNORE INTO 'tb_opc_write'
+                        SELECT f_tag_name AS tag_name, NOW() AS ts, 102 AS value FROM tb_tags_read_conf ttwc 
+                        WHERE f_description = "{config.DESC_ALARM}" """
+                conn.execute(q)
                     
         except Exception as E:
             logging(f"Failed to turning off COPT: {E}")
@@ -382,11 +371,6 @@ def bg_safeguard_update():
     if copt_safeguard_status:
         # Checking last alarm
         try:
-            # q = f"""SELECT value FROM {_DB_NAME_}.tb_opc_write_history_copt
-            #         WHERE tag_name = (SELECT conf.f_tag_name FROM {_DB_NAME_}.tb_tags_write_conf conf
-            #                         WHERE f_description = "{config.DESC_ALARM}")
-            #         ORDER BY ts DESC
-            #         LIMIT 1"""
             q = f"""SELECT value FROM {_DB_NAME_}.tb_opc_write_history
                     WHERE tag_name = (SELECT conf.f_tag_name FROM {_DB_NAME_}.tb_tags_read_conf conf
                                     WHERE f_description = "{config.DESC_ALARM}")
@@ -397,16 +381,11 @@ def bg_safeguard_update():
             else: alarm_current_status = 102
             if alarm_current_status != 100:
                 # Write back alarm 100 to DCS 
-                # for table in ['tb_opc_write_copt','tb_opc_write_history_copt']:
-                #     q = f"""INSERT IGNORE INTO {_DB_NAME_}.{table}
-                #             SELECT f_tag_name AS tag_name, NOW() AS ts, 100 AS value FROM {_DB_NAME_}.tb_tags_write_conf ttwc 
-                #             WHERE f_description = "{config.DESC_ALARM}" """
-                #     with engine.connect() as conn: res = conn.execute(q)
-                for table in ['tb_opc_write','tb_opc_write_history']:
-                    q = f"""INSERT IGNORE INTO {_DB_NAME_}.{table}
-                            SELECT f_tag_name AS tag_name, NOW() AS ts, 100 AS value FROM {_DB_NAME_}.tb_tags_read_conf ttwc 
-                            WHERE f_description = "{config.DESC_ALARM}" """
-                    with engine.connect() as conn: res = conn.execute(q)
+                # TODO: To be determined the alarm rules
+                q = f"""INSERT IGNORE INTO {_DB_NAME_}.'tb_opc_write'
+                        SELECT f_tag_name AS tag_name, NOW() AS ts, 100 AS value FROM {_DB_NAME_}.tb_tags_read_conf ttwc 
+                        WHERE f_description = "{config.DESC_ALARM}" """
+                with engine.connect() as conn: res = conn.execute(q)
                 logging(f'Write to OPC: {config.DESC_ALARM}: 102 changed to 100')
         except Exception as E:
             logging(f"Failed to send alarm to OPC: {E}")
@@ -453,7 +432,7 @@ def bg_write_recommendation_to_opc(MAX_BIAS_PERCENTAGE):
             LEFT JOIN tb_tags_read_conf conf 
             ON gen.tag_name = conf.f_description 
             WHERE gen.ts = (SELECT MAX(ts) FROM tb_combustion_model_generation gen)
-            GROUP BY conf.f_description """
+            AND conf.f_category = "Recommendation" """
     Recom = pd.read_sql(q, engine)
     Recom = Recom.dropna(subset=['f_description'])
     Recom['bias_value'] = Recom['value'] - Recom['current_value']
@@ -476,13 +455,14 @@ def bg_write_recommendation_to_opc(MAX_BIAS_PERCENTAGE):
         Recom.loc[i, 'bias_value'] = min(mxv, Recom.loc[i, 'bias_value'])
     Recom['value'] = Recom['current_value'] + Recom['bias_value']
 
-    # Calculate O2 Set Point based on GrossMW from DCS
-    q = f"""SELECT f_value FROM {_DB_NAME_}.cb_display disp
-            LEFT JOIN {_DB_NAME_}.tb_bat_raw raw
-            on disp.f_tags = raw.f_address_no 
-            WHERE f_desc = "generator_gross_load" """
-    dcs_mw = pd.read_sql(q, engine).values[0][0]
-    dcs_o2 = DCS_O2.predict(dcs_mw)
+    # Calculate O2 Set Point based on GrossMW from DCS 
+    # (skip calculation, direct bias for PCT)
+    # q = f"""SELECT f_value FROM {_DB_NAME_}.cb_display disp
+    #         LEFT JOIN {_DB_NAME_}.tb_bat_raw raw
+    #         on disp.f_tags = raw.f_address_no 
+    #         WHERE f_desc = "generator_gross_load" """
+    # dcs_mw = pd.read_sql(q, engine).values[0][0]
+    # dcs_o2 = DCS_O2.predict(dcs_mw)
 
     # # Change to tag
     # q = f"""SELECT f_value FROM tb_tags_read_conf conf
@@ -508,19 +488,11 @@ def bg_write_recommendation_to_opc(MAX_BIAS_PERCENTAGE):
     opc_write.columns = ['tag_name','ts','value']
     opc_write['ts'] = pd.to_datetime(time.ctime())
 
-    if o2_idx is not None:
-        opc_write.loc[o2_idx, 'value'] = opc_write.loc[o2_idx, 'value'] - dcs_o2
-
-    # # Remove tags that disabled partially
-    # for C in Enable_status.keys():
-    #     if not bool(Enable_status[C]['status']):
-    #         tags = Enable_status[C]['tag_lists']
-    #         opc_write = opc_write.drop(index = opc_write[opc_write['tag_name'].isin(tags)].index)
+    # (skip calculation, direct bias for PCT)
+    # if o2_idx is not None:
+    #     opc_write.loc[o2_idx, 'value'] = opc_write.loc[o2_idx, 'value'] - dcs_o2
     
-    # opc_write.to_sql('tb_opc_write_copt', engine, if_exists='append', index=False)
-    # opc_write.to_sql('tb_opc_write_history_copt', engine, if_exists='append', index=False)
     opc_write.to_sql('tb_opc_write', engine, if_exists='append', index=False)
-    opc_write.to_sql('tb_opc_write_history', engine, if_exists='append', index=False)
     logging(f'Write to OPC: \n{opc_write}\n')
     return 'Done!'
     
@@ -577,20 +549,22 @@ def bg_write_recommendation_to_opc1(MAX_BIAS_PERCENTAGE):
         elif 'O2' in Recom.loc[i, 'f_description']: o2_idx = i
     Recom['value'] = Recom['current_value'] + Recom['bias_value']
 
-    # Calculate O2 Set Point based on GrossMW from DCS
-    q = f"""SELECT f_value FROM {_DB_NAME_}.cb_display disp
-            LEFT JOIN {_DB_NAME_}.tb_bat_raw raw
-            on disp.f_tags = raw.f_address_no 
-            WHERE f_desc = "generator_gross_load" """
-    dcs_mw = pd.read_sql(q, engine).values[0][0]
-    dcs_o2 = DCS_O2.predict(dcs_mw)
+    # Calculate O2 Set Point based on GrossMW from DCS 
+    # (skip calculation, direct bias for PCT)
+    # q = f"""SELECT f_value FROM {_DB_NAME_}.cb_display disp
+    #         LEFT JOIN {_DB_NAME_}.tb_bat_raw raw
+    #         on disp.f_tags = raw.f_address_no 
+    #         WHERE f_desc = "generator_gross_load" """
+    # dcs_mw = pd.read_sql(q, engine).values[0][0]
+    # dcs_o2 = DCS_O2.predict(dcs_mw)
 
     opc_write = Recom.merge(Write_tags, how='left', left_on='f_description', right_on='f_description')[['f_tag_name_y','ts','value']].dropna()
     opc_write.columns = ['tag_name','ts','value']
     opc_write['ts'] = pd.to_datetime(time.ctime())
 
-    if o2_idx is not None:
-        opc_write.loc[o2_idx, 'value'] = opc_write.loc[o2_idx, 'value'] - dcs_o2
+    # (skip calculation, direct bias for PCT)
+    # if o2_idx is not None:
+    #     opc_write.loc[o2_idx, 'value'] = opc_write.loc[o2_idx, 'value'] - dcs_o2
 
     # Remove tags that disabled partially
     for C in Enable_status.keys():
@@ -598,10 +572,7 @@ def bg_write_recommendation_to_opc1(MAX_BIAS_PERCENTAGE):
             tags = Enable_status[C]['tag_lists']
             opc_write = opc_write.drop(index = opc_write[opc_write['tag_name'].isin(tags)].index)
     
-    # opc_write.to_sql('tb_opc_write_copt', engine, if_exists='append', index=False)
-    # opc_write.to_sql('tb_opc_write_history_copt', engine, if_exists='append', index=False)
     opc_write.to_sql('tb_opc_write', engine, if_exists='append', index=False)
-    opc_write.to_sql('tb_opc_write_history', engine, if_exists='append', index=False)
     logging(f'Write to OPC: {opc_write}')
     return 'Done!'
 
