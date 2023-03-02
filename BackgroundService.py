@@ -673,6 +673,18 @@ def bg_get_ml_recommendation():
         ret['message'] = message
         return ret
 
+def bg_get_ml_model_status():
+    q = f"""SELECT message FROM {_DB_NAME_}.tb_combustion_model_message
+        WHERE ts = (SELECT MAX(ts) FROM {_DB_NAME_}.tb_combustion_model_message)
+        AND ts > (NOW() - INTERVAL 1 HOUR) """
+    message = pd.read_sql(q, con)
+    if len(message) > 0:
+        message = message.values[0][0]
+        code = message.split(':')[0]
+        code = int(re.findall('[0-9]+', code)[0])
+        return code
+    return 'Failed'
+
 def bg_ml_runner():
     ENABLE_COPT = 0
     MAX_BIAS_PERCENTAGE = 5
@@ -681,13 +693,15 @@ def bg_ml_runner():
 
     t0 = time.time()
 
-    # Get Enable status
-    q = f"""SELECT conf.f_description, raw.f_value FROM {_DB_NAME_}.tb_tags_read_conf conf
+   # Get Enable status
+    q = f"""SELECT conf.f_description, CAST(raw.f_value AS FLOAT) AS f_value
+            FROM {_DB_NAME_}.tb_tags_read_conf conf
             LEFT JOIN {_DB_NAME_}.tb_bat_raw raw
             ON conf.f_tag_name = raw.f_address_no 
             WHERE conf.f_description IN ("{config.DESC_ENABLE_COPT}",
-            "{config.DESC_ENABLE_COPT_BT}","{config.DESC_ENABLE_COPT_SEC}") """
-    df = pd.read_sql(q, engine).set_index('f_description')['f_value']
+            "{config.DESC_ENABLE_COPT_BT}","{config.DESC_ENABLE_COPT_SEC}")
+            """
+    df = pd.read_sql(q, con).set_index('f_description')['f_value']
     ENABLE_COPT = df[config.DESC_ENABLE_COPT]
     ENABLE_COPT_BT = df[config.DESC_ENABLE_COPT_BT] if config.DESC_ENABLE_COPT_BT in df.index else 0
     ENABLE_COPT_SEC = df[config.DESC_ENABLE_COPT_SEC] if config.DESC_ENABLE_COPT_SEC in df.index else 0
