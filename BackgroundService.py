@@ -310,7 +310,7 @@ def bg_safeguard_update():
             opc_write = [[o2_recom_tag, ts, o2_bias]]
             opc_write = pd.DataFrame(opc_write, columns=['tag_name','ts','value'])
             
-            opc_write.to_sql('tb_opc_write', engine, if_exists='append', index=False)
+            opc_write.to_sql('tb_opc_write_copt', engine, if_exists='append', index=False)
             # opc_write.to_sql('tb_opc_write_history', engine, if_exists='append', index=False)
 
             # Append alarm history
@@ -336,11 +336,7 @@ def bg_safeguard_update():
 
             # Write alarm 102 to DCS 
             # TODO: To be determined the alarm rules
-            # q = f"""SELECT * FROM tb_opc_write_copt
-            #     WHERE tag_name = (SELECT f_tag_name AS tag_name FROM {_DB_NAME_}.tb_tags_write_conf ttwc 
-            #     WHERE f_description = "{config.DESC_ALARM}")
-            #     ORDER BY ts DESC LIMIT 10 """
-            q = f"""SELECT * FROM tb_opc_write
+            q = f"""SELECT * FROM tb_opc_write_copt
                 WHERE tag_name = (SELECT f_tag_name AS tag_name FROM {_DB_NAME_}.tb_tags_read_conf ttwc 
                 WHERE f_description = "{config.DESC_ALARM}")
                 ORDER BY ts DESC LIMIT 10 """
@@ -360,7 +356,7 @@ def bg_safeguard_update():
                     q = f"TRUNCATE tb_opc_write_copt"
                     conn.execute()
 
-                q = f"""INSERT IGNORE INTO 'tb_opc_write'
+                q = f"""INSERT IGNORE INTO 'tb_opc_write_copt'
                         SELECT f_tag_name AS tag_name, NOW() AS ts, 102 AS value FROM tb_tags_read_conf ttwc 
                         WHERE f_description = "{config.DESC_ALARM}" """
                 conn.execute(q)
@@ -382,7 +378,7 @@ def bg_safeguard_update():
             if alarm_current_status != 100:
                 # Write back alarm 100 to DCS 
                 # TODO: To be determined the alarm rules
-                q = f"""INSERT IGNORE INTO {_DB_NAME_}.'tb_opc_write'
+                q = f"""INSERT IGNORE INTO {_DB_NAME_}.'tb_opc_write_copt'
                         SELECT f_tag_name AS tag_name, NOW() AS ts, 100 AS value FROM {_DB_NAME_}.tb_tags_read_conf ttwc 
                         WHERE f_description = "{config.DESC_ALARM}" """
                 with engine.connect() as conn: res = conn.execute(q)
@@ -492,7 +488,7 @@ def bg_write_recommendation_to_opc(MAX_BIAS_PERCENTAGE):
     # if o2_idx is not None:
     #     opc_write.loc[o2_idx, 'value'] = opc_write.loc[o2_idx, 'value'] - dcs_o2
     
-    opc_write.to_sql('tb_opc_write', engine, if_exists='append', index=False)
+    opc_write.to_sql('tb_opc_write_copt', engine, if_exists='append', index=False)
     logging(f'Write to OPC: \n{opc_write}\n')
     return 'Done!'
     
@@ -572,7 +568,7 @@ def bg_write_recommendation_to_opc1(MAX_BIAS_PERCENTAGE):
             tags = Enable_status[C]['tag_lists']
             opc_write = opc_write.drop(index = opc_write[opc_write['tag_name'].isin(tags)].index)
     
-    opc_write.to_sql('tb_opc_write', engine, if_exists='append', index=False)
+    opc_write.to_sql('tb_opc_write_copt', engine, if_exists='append', index=False)
     logging(f'Write to OPC: {opc_write}')
     return 'Done!'
 
