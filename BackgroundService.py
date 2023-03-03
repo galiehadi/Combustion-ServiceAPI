@@ -36,6 +36,7 @@ def bg_update_notification():
         WHERE f_description = "{config.DESC_ENABLE_COPT}" """
     df_status_now = pd.read_sql(q, engine)
     tag_name, status_now, message, timestamp_now = df_status_now.iloc[0].values
+    status_now = int(status_now)
     timestamp_now = pd.to_datetime(timestamp_now).strftime('%Y-%m-%d %X')
 
     # Get latest update on message
@@ -45,7 +46,7 @@ def bg_update_notification():
         WHERE conf.f_description = "COMBUSTION ENABLE"
         ORDER BY notif.f_updated_at DESC LIMIT 1"""
     df_status_last = pd.read_sql(q, engine)
-    status_last = df_status_last['f_value'].values[0]
+    status_last = int(df_status_last['f_value'].values[0])
 
     if status_last != status_now:
         if int(status_now):
@@ -355,11 +356,12 @@ def bg_safeguard_update():
                 if opc_write_count > 15:
                     q = f"TRUNCATE tb_opc_write"
                     conn.execute()
-
-                q = f"""INSERT IGNORE INTO tb_opc_write
-                        SELECT f_tag_name AS tag_name, NOW() AS ts, 1 AS value FROM tb_tags_read_conf ttwc 
-                        WHERE f_description = "{config.DESC_ALARM}" """
-                conn.execute(q)
+                
+                for table in ['tb_opc_write','tb_opc_write_history']:
+                    q = f"""INSERT IGNORE INTO {table}
+                            SELECT f_tag_name AS tag_name, NOW() AS ts, 1 AS value FROM tb_tags_read_conf ttwc 
+                            WHERE f_description = "{config.DESC_ALARM}" """
+                    conn.execute(q)
                     
         except Exception as E:
             logging(f"Failed to turning off COPT: {E}")
@@ -378,10 +380,11 @@ def bg_safeguard_update():
             if alarm_current_status != 0:
                 # Write back alarm 0 to DCS 
                 # TODO: To be determined the alarm rules
-                q = f"""INSERT IGNORE INTO {_DB_NAME_}.tb_opc_write
-                        SELECT f_tag_name AS tag_name, NOW() AS ts, 0 AS value FROM {_DB_NAME_}.tb_tags_read_conf ttwc 
-                        WHERE f_description = "{config.DESC_ALARM}" """
-                with engine.connect() as conn: res = conn.execute(q)
+                for table in ['tb_opc_write','tb_opc_write_history']:
+                    q = f"""INSERT IGNORE INTO {_DB_NAME_}.{table}
+                            SELECT f_tag_name AS tag_name, NOW() AS ts, 0 AS value FROM {_DB_NAME_}.tb_tags_read_conf ttwc 
+                            WHERE f_description = "{config.DESC_ALARM}" """
+                    with engine.connect() as conn: res = conn.execute(q)
                 logging(f'Write to OPC: {config.DESC_ALARM}: 1 changed to 0')
         except Exception as E:
             logging(f"Failed to send alarm to OPC: {E}")
@@ -408,7 +411,7 @@ def bg_write_recommendation_to_opc(MAX_BIAS_PERCENTAGE):
 
     # Enable tags
     q = f"""SELECT f_category, f_description, f_tag_name FROM {_DB_NAME_}.tb_tags_read_conf
-            WHERE f_tag_use = "COPT"
+            WHERE f_category = "Recommendation"
             AND f_is_active = 1 """
     Write_tags = pd.read_sql(q, engine)
 
@@ -489,88 +492,89 @@ def bg_write_recommendation_to_opc(MAX_BIAS_PERCENTAGE):
     #     opc_write.loc[o2_idx, 'value'] = opc_write.loc[o2_idx, 'value'] - dcs_o2
     
     opc_write.to_sql('tb_opc_write', engine, if_exists='append', index=False)
+    opc_write.to_sql('tb_opc_write_history', engine, if_exists='append', index=False)
     logging(f'Write to OPC: \n{opc_write}\n')
     return 'Done!'
     
 
-# Write recommendation slowly with reading realtime data
-def bg_write_recommendation_to_opc1(MAX_BIAS_PERCENTAGE):
-    # Enable Status
-    q = f"""SELECT conf.f_description, raw.f_value FROM {_DB_NAME_}.tb_bat_raw raw
-            LEFT JOIN {_DB_NAME_}.tb_tags_read_conf conf
-            ON raw.f_address_no = conf.f_tag_name
-            WHERE conf.f_category LIKE "%ENABLE%" 
-            AND conf.f_is_active = 1
-            """
-    Enable_status_df = pd.read_sql(q, engine).set_index('f_description')['f_value']
-    Enable_status_df = Enable_status_df.replace(np.nan, 0)
+# # Write recommendation slowly with reading realtime data
+# def bg_write_recommendation_to_opc1(MAX_BIAS_PERCENTAGE):
+#     # Enable Status
+#     q = f"""SELECT conf.f_description, raw.f_value FROM {_DB_NAME_}.tb_bat_raw raw
+#             LEFT JOIN {_DB_NAME_}.tb_tags_read_conf conf
+#             ON raw.f_address_no = conf.f_tag_name
+#             WHERE conf.f_category LIKE "%ENABLE%" 
+#             AND conf.f_is_active = 1
+#             """
+#     Enable_status_df = pd.read_sql(q, engine).set_index('f_description')['f_value']
+#     Enable_status_df = Enable_status_df.replace(np.nan, 0)
 
-    # Enable tags
-    q = f"""SELECT f_category, f_description, f_tag_name FROM {_DB_NAME_}.tb_tags_read_conf
-            WHERE f_tag_use = "COPT" """
-    Write_tags = pd.read_sql(q, engine)
-    Write_tags
+#     # Enable tags
+#     q = f"""SELECT f_category, f_description, f_tag_name FROM {_DB_NAME_}.tb_tags_read_conf
+#             WHERE f_category = "Recommendation" """
+#     Write_tags = pd.read_sql(q, engine)
 
-    Enable_status = {}
-    for c in [config.DESC_ENABLE_COPT_BT, config.DESC_ENABLE_COPT_SEC, config.DESC_ENABLE_COPT_MOT]:
-        status = int(Enable_status_df[c]) if c in Enable_status_df.index else 0
-        tags = Write_tags[Write_tags['f_category'] == c]['f_tag_name'].values.tolist() if c in np.unique(Write_tags['f_category']) else []
-        Enable_status[c] = {
-            'status': status,
-            'tag_lists': tags
-        }
+#     Enable_status = {}
+#     for c in [config.DESC_ENABLE_COPT_BT, config.DESC_ENABLE_COPT_SEC, config.DESC_ENABLE_COPT_MOT]:
+#         status = int(Enable_status_df[c]) if c in Enable_status_df.index else 0
+#         tags = Write_tags[Write_tags['f_category'] == c]['f_tag_name'].values.tolist() if c in np.unique(Write_tags['f_category']) else []
+#         Enable_status[c] = {
+#             'status': status,
+#             'tag_lists': tags
+#         }
 
-    # Limit recommendations to +- MAX_BIAS_PERCENTAGE %
-    q = f"""SELECT gen.model_id, gen.ts, conf.f_tag_name, conf.f_description, gen.value, gen.bias_value, gen.enable_status, 
-            (CASE WHEN gen.tag_name = "Total Secondary Air Flow" THEN AVG(raw.f_value*2) ELSE raw.f_value END) AS current_value
-            FROM tb_combustion_model_generation gen
-            LEFT JOIN tb_tags_read_conf conf
-            ON gen.tag_name = conf.f_description 
-            LEFT JOIN tb_bat_raw raw 
-            ON conf.f_tag_name = raw.f_address_no 
-            WHERE gen.ts = (SELECT MAX(ts) FROM tb_combustion_model_generation gen)
-            AND conf.f_category != "Recommendation"
-            AND conf.f_is_active = 1
-            GROUP BY gen.tag_name"""
-    Recom = pd.read_sql(q, engine)
-    Recom['bias_value'] = Recom['value'] - Recom['current_value']
+#     # Limit recommendations to +- MAX_BIAS_PERCENTAGE %
+#     q = f"""SELECT gen.model_id, gen.ts, conf.f_tag_name, conf.f_description, gen.value, gen.bias_value, gen.enable_status, 
+#             (CASE WHEN gen.tag_name = "Total Secondary Air Flow" THEN AVG(raw.f_value*2) ELSE raw.f_value END) AS current_value
+#             FROM tb_combustion_model_generation gen
+#             LEFT JOIN tb_tags_read_conf conf
+#             ON gen.tag_name = conf.f_description 
+#             LEFT JOIN tb_bat_raw raw 
+#             ON conf.f_tag_name = raw.f_address_no 
+#             WHERE gen.ts = (SELECT MAX(ts) FROM tb_combustion_model_generation gen)
+#             AND conf.f_category != "Recommendation"
+#             AND conf.f_is_active = 1
+#             GROUP BY gen.tag_name"""
+#     Recom = pd.read_sql(q, engine)
+#     Recom['bias_value'] = Recom['value'] - Recom['current_value']
 
-    o2_idx = None
-    # Limit recommendation to MAX_BIAS_PERCENTAGE %
-    for i in Recom.index:
-        mxv = MAX_BIAS_PERCENTAGE * abs(Recom.loc[i, 'current_value']) / 100
-        Recom.loc[i, 'bias_value'] = max(-mxv, Recom.loc[i, 'bias_value'])
-        Recom.loc[i, 'bias_value'] = min(mxv, Recom.loc[i, 'bias_value'])
-        if 'Oxygen' in Recom.loc[i, 'f_description']: o2_idx = i
-        elif 'O2' in Recom.loc[i, 'f_description']: o2_idx = i
-    Recom['value'] = Recom['current_value'] + Recom['bias_value']
+#     o2_idx = None
+#     # Limit recommendation to MAX_BIAS_PERCENTAGE %
+#     for i in Recom.index:
+#         mxv = MAX_BIAS_PERCENTAGE * abs(Recom.loc[i, 'current_value']) / 100
+#         Recom.loc[i, 'bias_value'] = max(-mxv, Recom.loc[i, 'bias_value'])
+#         Recom.loc[i, 'bias_value'] = min(mxv, Recom.loc[i, 'bias_value'])
+#         if 'Oxygen' in Recom.loc[i, 'f_description']: o2_idx = i
+#         elif 'O2' in Recom.loc[i, 'f_description']: o2_idx = i
+#     Recom['value'] = Recom['current_value'] + Recom['bias_value']
 
-    # Calculate O2 Set Point based on GrossMW from DCS 
-    # (skip calculation, direct bias for PCT)
-    # q = f"""SELECT f_value FROM {_DB_NAME_}.cb_display disp
-    #         LEFT JOIN {_DB_NAME_}.tb_bat_raw raw
-    #         on disp.f_tags = raw.f_address_no 
-    #         WHERE f_desc = "generator_gross_load" """
-    # dcs_mw = pd.read_sql(q, engine).values[0][0]
-    # dcs_o2 = DCS_O2.predict(dcs_mw)
+#     # Calculate O2 Set Point based on GrossMW from DCS 
+#     # (skip calculation, direct bias for PCT)
+#     # q = f"""SELECT f_value FROM {_DB_NAME_}.cb_display disp
+#     #         LEFT JOIN {_DB_NAME_}.tb_bat_raw raw
+#     #         on disp.f_tags = raw.f_address_no 
+#     #         WHERE f_desc = "generator_gross_load" """
+#     # dcs_mw = pd.read_sql(q, engine).values[0][0]
+#     # dcs_o2 = DCS_O2.predict(dcs_mw)
 
-    opc_write = Recom.merge(Write_tags, how='left', left_on='f_description', right_on='f_description')[['f_tag_name_y','ts','value']].dropna()
-    opc_write.columns = ['tag_name','ts','value']
-    opc_write['ts'] = pd.to_datetime(time.ctime())
+#     opc_write = Recom.merge(Write_tags, how='left', left_on='f_description', right_on='f_description')[['f_tag_name_y','ts','value']].dropna()
+#     opc_write.columns = ['tag_name','ts','value']
+#     opc_write['ts'] = pd.to_datetime(time.ctime())
 
-    # (skip calculation, direct bias for PCT)
-    # if o2_idx is not None:
-    #     opc_write.loc[o2_idx, 'value'] = opc_write.loc[o2_idx, 'value'] - dcs_o2
+#     # (skip calculation, direct bias for PCT)
+#     # if o2_idx is not None:
+#     #     opc_write.loc[o2_idx, 'value'] = opc_write.loc[o2_idx, 'value'] - dcs_o2
 
-    # Remove tags that disabled partially
-    for C in Enable_status.keys():
-        if not bool(Enable_status[C]['status']):
-            tags = Enable_status[C]['tag_lists']
-            opc_write = opc_write.drop(index = opc_write[opc_write['tag_name'].isin(tags)].index)
+#     # Remove tags that disabled partially
+#     for C in Enable_status.keys():
+#         if not bool(Enable_status[C]['status']):
+#             tags = Enable_status[C]['tag_lists']
+#             opc_write = opc_write.drop(index = opc_write[opc_write['tag_name'].isin(tags)].index)
     
-    opc_write.to_sql('tb_opc_write', engine, if_exists='append', index=False)
-    logging(f'Write to OPC: {opc_write}')
-    return 'Done!'
+#     opc_write.to_sql('tb_opc_write', engine, if_exists='append', index=False)
+#     opc_write.to_sql('tb_opc_write_history', engine, if_exists='append', index=False)
+#     logging(f'Write to OPC: {opc_write}')
+#     return 'Done!'
 
 def bg_get_ml_model_status():
     q = f"""SELECT message FROM {_DB_NAME_}.tb_combustion_model_message 
