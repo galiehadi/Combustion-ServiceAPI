@@ -334,7 +334,7 @@ def bg_safeguard_update():
                 #! di cek lagi harusnya apa
                 pass 
 
-            # Write alarm 102 to DCS 
+            # Write alarm 1 to DCS 
             # TODO: To be determined the alarm rules
             q = f"""SELECT * FROM tb_opc_write
                 WHERE tag_name = (SELECT f_tag_name AS tag_name FROM {_DB_NAME_}.tb_tags_read_conf ttwc 
@@ -343,8 +343,8 @@ def bg_safeguard_update():
             Latest_OPC_alarm = pd.read_sql(q, engine)
             
             if len(Latest_OPC_alarm) != 0:
-                if Latest_OPC_alarm.iloc[0]["value"] != 102:
-                    Latest_OPC_alarm_timestamp = Latest_OPC_alarm.query('value == 102')['ts'].max()
+                if Latest_OPC_alarm.iloc[0]["value"] != 1:
+                    Latest_OPC_alarm_timestamp = Latest_OPC_alarm.query('value == 1')['ts'].max()
                     raise(ValueError(f"""Alarm has been executed on "{Latest_OPC_alarm_timestamp}". Waiting on OPC Writers to execute. """))
             
             # Force truncate opc write and re-disable COPT
@@ -357,7 +357,7 @@ def bg_safeguard_update():
                     conn.execute()
 
                 q = f"""INSERT IGNORE INTO tb_opc_write
-                        SELECT f_tag_name AS tag_name, NOW() AS ts, 102 AS value FROM tb_tags_read_conf ttwc 
+                        SELECT f_tag_name AS tag_name, NOW() AS ts, 1 AS value FROM tb_tags_read_conf ttwc 
                         WHERE f_description = "{config.DESC_ALARM}" """
                 conn.execute(q)
                     
@@ -374,15 +374,15 @@ def bg_safeguard_update():
                     LIMIT 1"""
             alarm_current_status = pd.read_sql(q, engine)
             if len(alarm_current_status) > 0: alarm_current_status = int(alarm_current_status.values)
-            else: alarm_current_status = 102
-            if alarm_current_status != 100:
-                # Write back alarm 100 to DCS 
+            else: alarm_current_status = 1
+            if alarm_current_status != 0:
+                # Write back alarm 0 to DCS 
                 # TODO: To be determined the alarm rules
                 q = f"""INSERT IGNORE INTO {_DB_NAME_}.tb_opc_write
-                        SELECT f_tag_name AS tag_name, NOW() AS ts, 100 AS value FROM {_DB_NAME_}.tb_tags_read_conf ttwc 
+                        SELECT f_tag_name AS tag_name, NOW() AS ts, 0 AS value FROM {_DB_NAME_}.tb_tags_read_conf ttwc 
                         WHERE f_description = "{config.DESC_ALARM}" """
                 with engine.connect() as conn: res = conn.execute(q)
-                logging(f'Write to OPC: {config.DESC_ALARM}: 102 changed to 100')
+                logging(f'Write to OPC: {config.DESC_ALARM}: 1 changed to 0')
         except Exception as E:
             logging(f"Failed to send alarm to OPC: {E}")
     return S_COPT
