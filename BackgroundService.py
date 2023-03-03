@@ -233,7 +233,7 @@ def bg_combustion_watchdog_check():
             opc_write = pd.DataFrame(opc_write, columns=['tag_name','ts','value'])
 
             opc_write.to_sql('tb_opc_write', engine, if_exists='append', index=False)
-            # opc_write.to_sql('tb_opc_write_history', engine, if_exists='append', index=False)
+            opc_write.to_sql('tb_opc_write_history', engine, if_exists='append', index=False)
         except Exception as E:
             logging(f"Failed to turn off COPT: {E}")
     
@@ -311,7 +311,7 @@ def bg_safeguard_update():
             opc_write = pd.DataFrame(opc_write, columns=['tag_name','ts','value'])
             
             opc_write.to_sql('tb_opc_write', engine, if_exists='append', index=False)
-            # opc_write.to_sql('tb_opc_write_history', engine, if_exists='append', index=False)
+            opc_write.to_sql('tb_opc_write_history', engine, if_exists='append', index=False)
 
             # Append alarm history
             Alarms = S_COPT['Individual Alarm']
