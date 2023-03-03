@@ -522,7 +522,7 @@ def bg_write_recommendation_to_opc1(MAX_BIAS_PERCENTAGE):
 
     # Limit recommendations to +- MAX_BIAS_PERCENTAGE %
     q = f"""SELECT gen.model_id, gen.ts, conf.f_tag_name, conf.f_description, gen.value, gen.bias_value, gen.enable_status, 
-            (CASE WHEN gen.tag_name = "Total Secondary Air Flow" THEN AVG(raw.f_value*2) ELSE raw.f_value END) AS current_value
+            (CASE WHEN gen.tag_name = "Total Secondary Air Flow" THEN AVG(CAST(raw.f_value AS float)*2) ELSE CAST(raw.f_value AS float) END) AS current_value
             FROM tb_combustion_model_generation gen
             LEFT JOIN tb_tags_read_conf conf
             ON gen.tag_name = conf.f_description 
