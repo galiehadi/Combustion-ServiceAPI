@@ -356,7 +356,7 @@ def bg_safeguard_update():
                     q = f"TRUNCATE tb_opc_write_copt"
                     conn.execute()
 
-                q = f"""INSERT IGNORE INTO 'tb_opc_write_copt'
+                q = f"""INSERT IGNORE INTO tb_opc_write_copt
                         SELECT f_tag_name AS tag_name, NOW() AS ts, 102 AS value FROM tb_tags_read_conf ttwc 
                         WHERE f_description = "{config.DESC_ALARM}" """
                 conn.execute(q)
@@ -378,7 +378,7 @@ def bg_safeguard_update():
             if alarm_current_status != 100:
                 # Write back alarm 100 to DCS 
                 # TODO: To be determined the alarm rules
-                q = f"""INSERT IGNORE INTO {_DB_NAME_}.'tb_opc_write_copt'
+                q = f"""INSERT IGNORE INTO {_DB_NAME_}.tb_opc_write_copt
                         SELECT f_tag_name AS tag_name, NOW() AS ts, 100 AS value FROM {_DB_NAME_}.tb_tags_read_conf ttwc 
                         WHERE f_description = "{config.DESC_ALARM}" """
                 with engine.connect() as conn: res = conn.execute(q)
