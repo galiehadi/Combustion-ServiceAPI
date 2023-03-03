@@ -595,9 +595,10 @@ def bg_get_ml_recommendation():
 
         # Calling ML Recommendations to the latest recommendation
         # TODO: Set latest COPT call based on timestamp
-        q = f"""SELECT f_date_rec, f_value FROM {_DB_NAME_}.tb_bat_raw
+        q = f"""SELECT f_date_rec, CAST(f_value AS FLOAT) AS f_value FROM {_DB_NAME_}.tb_bat_raw
                 WHERE f_address_no = "{config.TAG_COPT_ISCALLING}" """
         copt_is_calling_timestamp, copt_is_calling = pd.read_sql(q, engine).values[0]
+        copt_is_calling = bool(copt_is_calling)
         if not copt_is_calling:
             logging('Calling COPT ...')
             q = f"""UPDATE {_DB_NAME_}.tb_bat_raw
@@ -710,7 +711,7 @@ def bg_ml_runner():
             
             # Calling ML Recommendations to the latest recommendation
             val = bg_get_ml_recommendation()
-            
+
             if val['status'] == 'Success':
                 if not str(val['message']).startswith('Code 104'):
                     # Sending values to OPC even with COPT turned off
