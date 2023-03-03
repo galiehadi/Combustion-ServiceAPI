@@ -598,6 +598,7 @@ def bg_get_ml_recommendation():
         q = f"""SELECT f_date_rec, f_value FROM {_DB_NAME_}.tb_bat_raw
                 WHERE f_address_no = "{config.TAG_COPT_ISCALLING}" """
         copt_is_calling_timestamp, copt_is_calling = pd.read_sql(q, engine).values[0]
+        copt_is_calling = bool(float(copt_is_calling))
         if not copt_is_calling:
             logging('Calling COPT ...')
             q = f"""UPDATE {_DB_NAME_}.tb_bat_raw
@@ -623,7 +624,6 @@ def bg_get_ml_recommendation():
             res = response_json
             ret['status'] = 'Success'
             ret['message'] = res['message']
-            return ret
         elif (now - copt_is_calling_timestamp) > pd.Timedelta('60sec'):
             # Set back COPT_is_calling to 0 if last update > 60 sec ago.
             message = "Set back COPT_is_calling to 0 cause a timeout."
@@ -634,6 +634,7 @@ def bg_get_ml_recommendation():
             with engine.connect() as conn: res = conn.execute(q)
             ret['status'] = 'Waiting'
             ret['message'] = message
+        return ret
     except Exception as e:
         message = f'Machine learning prediction error: {traceback.format_exc()}'
         logging(message)
