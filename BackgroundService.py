@@ -30,7 +30,7 @@ def logging(text):
 
 def bg_update_notification():
     # Get status enable now
-    q = f"""SELECT raw.f_address_no, raw.f_value, '' AS f_message, raw.f_updated_at FROM tb_tags_read_conf conf 
+    q = f"""SELECT raw.f_address_no, CAST(raw.f_value AS float) as f_value, '' AS f_message, raw.f_updated_at FROM tb_tags_read_conf conf 
         LEFT JOIN tb_bat_raw raw
         ON conf.f_tag_name = raw.f_address_no 
         WHERE f_description = "{config.DESC_ENABLE_COPT}" """
@@ -86,7 +86,7 @@ def bg_combustion_safeguard_check():
                 rule.f_tag_sensor,
                 conf.f_description,
                 rule.f_bracket_open,
-                raw.f_value,
+                CAST(raw.f_value AS float) as f_value,
                 rule.f_bracket_close
             FROM
                 {_DB_NAME_}.tb_combustion_rules_dtl rule
@@ -159,7 +159,7 @@ def bg_sootblow_safeguard_check():
                 rule.f_tag_sensor,
                 conf.f_description,
                 rule.f_bracket_open,
-                raw.f_value,
+                CAST(raw.f_value AS float) as f_value,
                 rule.f_bracket_close
             FROM
                 {_DB_NAME_}.tb_combustion_rules_dtl rule
@@ -197,14 +197,14 @@ def bg_sootblow_safeguard_check():
 
 def bg_combustion_watchdog_check():
     t0 = time.time()
-    q = f"""SELECT f_value FROM tb_bat_raw tbr 
+    q = f"""SELECT CAST(f_value AS int) as f_value FROM tb_bat_raw tbr 
             WHERE f_address_no = "{config.WATCHDOG_TAG}" """
-    q = f"""SELECT conf.f_description, raw.f_value FROM tb_bat_raw raw
+    q = f"""SELECT conf.f_description, CAST(raw.f_value AS int) as f_value FROM tb_bat_raw raw
             LEFT JOIN tb_tags_read_conf conf
             ON conf.f_tag_name = raw.f_address_no 
             WHERE conf.f_description = "{config.DESC_ENABLE_COPT}"
             UNION 
-            SELECT raw.f_address_no, raw.f_value FROM tb_bat_raw raw
+            SELECT raw.f_address_no, CAST(raw.f_value AS int) as f_value FROM tb_bat_raw raw
             WHERE f_address_no = "{config.WATCHDOG_TAG}" """
     DF = pd.read_sql(q, engine)
     DF = DF.set_index('f_description')['f_value']
@@ -273,15 +273,15 @@ def bg_safeguard_update():
         logging(f"Failed to update SOPT SAFEGUARD: {E}")
 
     # Get current condition
-    q = f"""SELECT NOW() AS f_date_rec, f_description as name, raw.f_value FROM {_DB_NAME_}.tb_tags_read_conf conf
+    q = f"""SELECT NOW() AS f_date_rec, f_description as name, CAST(raw.f_value AS float) as f_value FROM {_DB_NAME_}.tb_tags_read_conf conf
             LEFT JOIN {_DB_NAME_}.tb_bat_raw raw
             ON conf.f_tag_name = raw.f_address_no 
             WHERE conf.f_description = "{config.DESC_ENABLE_COPT}" 
             UNION 
-            SELECT NOW() AS f_date_rec, f_address_no AS name, f_value FROM {_DB_NAME_}.tb_bat_raw raw
+            SELECT NOW() AS f_date_rec, f_address_no AS name, CAST(f_value AS float) as f_value FROM {_DB_NAME_}.tb_bat_raw raw
             WHERE f_address_no = "{config.SAFEGUARD_TAG}"
             UNION
-            SELECT NOW() AS f_date_rec, disp.f_desc AS name, raw.f_value FROM {_DB_NAME_}.cb_display disp
+            SELECT NOW() AS f_date_rec, disp.f_desc AS name, CAST(raw.f_value AS float) as f_value FROM {_DB_NAME_}.cb_display disp
             LEFT JOIN {_DB_NAME_}.tb_bat_raw raw
             ON disp.f_tags = raw.f_address_no 
             WHERE disp.f_desc IN ("{O2_tag}", "{GrossMW_tag}") """
@@ -397,7 +397,7 @@ def bg_get_recom_exec_interval():
 
 # Write recommendation periodical from operator parameters
 def bg_write_recommendation_to_opc(MAX_BIAS_PERCENTAGE):
-    q = f"""SELECT conf.f_description, raw.f_value FROM {_DB_NAME_}.tb_bat_raw raw
+    q = f"""SELECT conf.f_description, CAST(raw.f_value AS float) as f_value FROM {_DB_NAME_}.tb_bat_raw raw
             LEFT JOIN {_DB_NAME_}.tb_tags_read_conf conf
             ON raw.f_address_no = conf.f_tag_name
             WHERE conf.f_category LIKE "%ENABLE%" 
@@ -496,7 +496,7 @@ def bg_write_recommendation_to_opc(MAX_BIAS_PERCENTAGE):
 # Write recommendation slowly with reading realtime data
 def bg_write_recommendation_to_opc1(MAX_BIAS_PERCENTAGE):
     # Enable Status
-    q = f"""SELECT conf.f_description, raw.f_value FROM {_DB_NAME_}.tb_bat_raw raw
+    q = f"""SELECT conf.f_description, CAST(raw.f_value AS float) as f_value FROM {_DB_NAME_}.tb_bat_raw raw
             LEFT JOIN {_DB_NAME_}.tb_tags_read_conf conf
             ON raw.f_address_no = conf.f_tag_name
             WHERE conf.f_category LIKE "%ENABLE%" 
@@ -733,7 +733,7 @@ def bg_ml_runner():
             logging(f"Last recommendation was {(now - LATEST_RECOMMENDATION_TIME)} ago. Sending recommendation values to OPC smoothly.")
             try:
                 # Checking current O2 level
-                q = f"""SELECT raw.f_value FROM {_DB_NAME_}.cb_display disp
+                q = f"""SELECT CAST(raw.f_value AS float) as f_value FROM {_DB_NAME_}.cb_display disp
                         LEFT JOIN {_DB_NAME_}.tb_bat_raw raw
                         ON disp.f_tags = raw.f_address_no 
                         WHERE disp.f_desc = "excess_o2" """
