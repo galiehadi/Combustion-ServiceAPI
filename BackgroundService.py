@@ -623,7 +623,6 @@ def bg_get_ml_recommendation():
             res = response_json
             ret['status'] = 'Success'
             ret['message'] = res['message']
-            return ret
         elif (now - copt_is_calling_timestamp) > pd.Timedelta('60sec'):
             # Set back COPT_is_calling to 0 if last update > 60 sec ago.
             message = "Set back COPT_is_calling to 0 cause a timeout."
@@ -634,6 +633,7 @@ def bg_get_ml_recommendation():
             with engine.connect() as conn: res = conn.execute(q)
             ret['status'] = 'Waiting'
             ret['message'] = message
+        return ret
     except Exception as e:
         message = f'Machine learning prediction error: {traceback.format_exc()}'
         logging(message)
@@ -710,7 +710,7 @@ def bg_ml_runner():
             
             # Calling ML Recommendations to the latest recommendation
             val = bg_get_ml_recommendation()
-
+            
             if val['status'] == 'Success':
                 if not str(val['message']).startswith('Code 104'):
                     # Sending values to OPC even with COPT turned off
