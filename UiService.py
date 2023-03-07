@@ -130,11 +130,16 @@ def get_recommendations(payload = None, sql_interval = '1 DAY', download = False
         return save_to_path(df, "recommendation")
 
     else:
+        last_recommendation = str(df['timestamp'].max())
+        
+        # No payday no update.
+        df = pd.DataFrame(columns=df.columns)
+        last_recommendation = 'No payday no update.'
+        
         for c in df.columns[-3:]:
             df[c] = np.round(df[c], 3)
         df_dict = df.astype(str).to_dict('records')
         
-        last_recommendation = str(df['timestamp'].max())
         
         return df_dict, last_recommendation
 
