@@ -78,6 +78,7 @@ def get_comb_tags():
             ON cd.f_tags = tbr.f_address_no 
             ORDER BY cd.f_desc ASC"""
     df = pd.read_sql(q, engine)
+    df['f_units'] = df['f_units'].astype(str)
     df['f_value'] = df['f_value'].astype(str)
     df = df.replace('None',0)
     df = df.set_index('f_desc')
@@ -131,10 +132,6 @@ def get_recommendations(payload = None, sql_interval = '1 DAY', download = False
 
     else:
         last_recommendation = str(df['timestamp'].max())
-        
-        # No payday no update.
-        df = pd.DataFrame(columns=df.columns)
-        last_recommendation = 'No payday no update.'
         
         for c in df.columns[-3:]:
             df[c] = np.round(df[c], 3)
