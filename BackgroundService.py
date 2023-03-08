@@ -33,7 +33,7 @@ def bg_update_notification():
     q = f"""SELECT raw.f_address_no, CAST(raw.f_value AS float) as f_value, '' AS f_message, raw.f_updated_at FROM tb_tags_read_conf conf 
         LEFT JOIN tb_bat_raw raw
         ON conf.f_tag_name = raw.f_address_no 
-        WHERE f_description = "{config.DESC_ENABLE_COPT}" """
+        WHERE conf.f_description = "{config.DESC_ENABLE_COPT}" """
     df_status_now = pd.read_sql(q, engine)
     tag_name, status_now, message, timestamp_now = df_status_now.iloc[0].values
     status_now = int(status_now)
@@ -43,7 +43,7 @@ def bg_update_notification():
     q = f"""SELECT notif.f_value from tb_tags_read_conf conf
         LEFT JOIN tb_bat_notif notif 
         ON conf.f_tag_name = notif.f_address_no 
-        WHERE conf.f_description = "COMBUSTION ENABLE"
+        WHERE conf.f_description = "{config.DESC_ENABLE_COPT}"
         ORDER BY notif.f_updated_at DESC LIMIT 1"""
     df_status_last = pd.read_sql(q, engine)
     status_last = int(df_status_last['f_value'].values[0])
