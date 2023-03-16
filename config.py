@@ -46,6 +46,7 @@ PARAMETER_WRITE = {
 TEMP_FOLDER = 'data/temp/'
 
 "Setting Karakter O2 di DCS"
+
 DCS_Xp = [ 0,   45,   77,   91,  100 ] # Dalam persen
 DCS_X  = [ 0, 400, 600, 800, 1025, 1200 ]
 DCS_Y  = [ 10, 6, 4.5, 3.5, 3, 2.5 ]

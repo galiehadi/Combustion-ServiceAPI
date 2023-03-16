@@ -78,11 +78,13 @@ def get_comb_tags():
             ON cd.f_tags = tbr.f_address_no 
             ORDER BY cd.f_desc ASC"""
     df = pd.read_sql(q, engine)
+    df['f_data_type'] = df['f_data_type'].astype(str)
+    df['f_units'] = df['f_units'].astype(str)
     df['f_value'] = df['f_value'].astype(str)
-    df = df.replace('None',0)
-    df = df.set_index('f_desc')
 
-    # df.loc['excess_o2','f_value']  = float(df.loc['excess_o2','f_value']) * 1.6844264 + 0.16792374
+    df['f_value'] = df['f_value'].replace('None',0)
+    df = df.replace('None','')
+    df = df.set_index('f_desc')
 
     o2_intercept, o2_bias = get_o2_converter_parameters()
     df.loc['excess_o2','f_value']  = float(df.loc['excess_o2','f_value']) * o2_intercept + o2_bias
@@ -130,11 +132,12 @@ def get_recommendations(payload = None, sql_interval = '1 DAY', download = False
         return save_to_path(df, "recommendation")
 
     else:
+        last_recommendation = str(df['timestamp'].max())
+        
         for c in df.columns[-3:]:
             df[c] = np.round(df[c], 3)
         df_dict = df.astype(str).to_dict('records')
         
-        last_recommendation = str(df['timestamp'].max())
         
         return df_dict, last_recommendation
 
