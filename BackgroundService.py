@@ -19,6 +19,7 @@ DEBUG_MODE = True
 dcs_x = config.DCS_X
 dcs_y = config.DCS_Y
 DCS_O2 = RegionalLinearReg(dcs_x, dcs_y)
+O2_tag, GrossMW_tag, COPTenable_name = ['excess_o2', 'steam_flow', config.DESC_ENABLE_COPT]
 
 con = f"mysql+mysqlconnector://{_USER_}:{_PASS_}@{_IP_}/{_DB_NAME_}"
 engine = sqlalchemy.create_engine(con)
@@ -253,7 +254,7 @@ def bg_safeguard_update():
     copt_safeguard_status = S_COPT['Safeguard Status']
     sopt_safeguard_status = S_SOPT['Safeguard Status']
 
-    O2_tag, GrossMW_tag, COPTenable_name = ['excess_o2', 'steam_flow', config.DESC_ENABLE_COPT]
+    # O2_tag, GrossMW_tag, COPTenable_name = ['excess_o2', 'steam_flow', config.DESC_ENABLE_COPT]
 
     # Always update COPT safeguard status
     q = f"""UPDATE {_DB_NAME_}.tb_bat_raw SET f_date_rec=NOW(), f_value={1 if copt_safeguard_status else 0}, f_updated_at=NOW()
@@ -306,7 +307,7 @@ def bg_safeguard_update():
             
             # Revert all changes
             copt_enable = df[COPTenable_name].max()
-            o2_bias = o2_current #- DCS_O2.predict(mw_current)
+            o2_bias = o2_current - DCS_O2.predict(mw_current)
 
             opc_write = [[o2_recom_tag, ts, o2_bias]]
             opc_write = pd.DataFrame(opc_write, columns=['tag_name','ts','value'])
@@ -455,13 +456,12 @@ def bg_write_recommendation_to_opc(MAX_BIAS_PERCENTAGE):
     Recom['value'] = Recom['current_value'] + Recom['bias_value']
 
     # Calculate O2 Set Point based on GrossMW from DCS 
-    # (skip calculation, direct bias for PCT)
-    # q = f"""SELECT f_value FROM {_DB_NAME_}.cb_display disp
-    #         LEFT JOIN {_DB_NAME_}.tb_bat_raw raw
-    #         on disp.f_tags = raw.f_address_no 
-    #         WHERE f_desc = "generator_gross_load" """
-    # dcs_mw = pd.read_sql(q, engine).values[0][0]
-    # dcs_o2 = DCS_O2.predict(dcs_mw)
+    q = f"""SELECT f_value FROM {_DB_NAME_}.cb_display disp
+            LEFT JOIN {_DB_NAME_}.tb_bat_raw raw
+            on disp.f_tags = raw.f_address_no 
+            WHERE f_desc = "{GrossMW_tag}" """
+    dcs_mw = pd.read_sql(q, engine).values[0][0]
+    dcs_o2 = DCS_O2.predict(dcs_mw)
 
     # # Change to tag
     # q = f"""SELECT f_value FROM tb_tags_read_conf conf
@@ -488,8 +488,8 @@ def bg_write_recommendation_to_opc(MAX_BIAS_PERCENTAGE):
     opc_write['ts'] = pd.to_datetime(time.ctime())
 
     # (skip calculation, direct bias for PCT)
-    # if o2_idx is not None:
-    #     opc_write.loc[o2_idx, 'value'] = opc_write.loc[o2_idx, 'value'] - dcs_o2
+    if o2_idx is not None:
+        opc_write.loc[o2_idx, 'value'] = opc_write.loc[o2_idx, 'value'] - dcs_o2
     
     opc_write.to_sql('tb_opc_write', engine, if_exists='append', index=False)
     opc_write.to_sql('tb_opc_write_history', engine, if_exists='append', index=False)
