@@ -253,7 +253,7 @@ def bg_safeguard_update():
     copt_safeguard_status = S_COPT['Safeguard Status']
     sopt_safeguard_status = S_SOPT['Safeguard Status']
 
-    O2_tag, GrossMW_tag, COPTenable_name = ['excess_o2', 'generator_gross_load', config.DESC_ENABLE_COPT]
+    O2_tag, GrossMW_tag, COPTenable_name = ['excess_o2', 'steam_flow', config.DESC_ENABLE_COPT]
 
     # Always update COPT safeguard status
     q = f"""UPDATE {_DB_NAME_}.tb_bat_raw SET f_date_rec=NOW(), f_value={1 if copt_safeguard_status else 0}, f_updated_at=NOW()

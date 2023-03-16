@@ -11,8 +11,7 @@ _IP_ = "192.168.32.6:3306" # "10.7.1.116:33008" #
 _LOCAL_IP_ = "192.168.32.6:5002" # "0.0.0.0:5002"
 _DB_NAME_ = "db_bat_pct1"
 
-
-"Setting parameter nama variabel"
+# "Setting parameter nama variabel"
 
 WATCHDOG_TAG = "OPC.AW1002.1LSB.WATCHDOG_STS.BO02"
 SAFEGUARD_TAG = "SAFEGUARD:COMBUSTION"
@@ -47,6 +46,7 @@ PARAMETER_WRITE = {
 TEMP_FOLDER = 'data/temp/'
 
 "Setting Karakter O2 di DCS"
-DCS_Xp = [ 0,   45,   77,   91,  100] # Dalam persen
-DCS_X  = [ 0,  150,  255,  300,  330]
-DCS_Y  = [ 8,    6,  4.5,    4,    4]
+
+DCS_Xp = [ 0,   45,   77,   91,  100 ] # Dalam persen
+DCS_X  = [ 0, 400, 600, 800, 1025, 1200 ]
+DCS_Y  = [ 10, 6, 4.5, 3.5, 3, 2.5 ]
