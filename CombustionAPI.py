@@ -12,7 +12,7 @@ log = systemlog.getLogger('werkzeug')
 log.setLevel(systemlog.ERROR)
 app = Flask(__name__)
 cors = CORS(app, supports_credentials=True)
-debug_mode = True
+debug_mode = False
 
 # ================================== Service UI ================================== #
 @app.route('/service/copt/bat/combustion/indicator')
