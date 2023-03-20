@@ -1,13 +1,13 @@
 """
 Setting parameter untuk koneksi ke database.
 """
-__version__ = 'v1.5.5'
+__version__ = 'v1.5.6'
 
 _UNIT_CODE_ = "PCT1"
 _UNIT_NAME_ = "PLTU Pacitan 1"
 _USER_ = "bat_copt"
 _PASS_ = "P@ssw0rd"
-_IP_ = "192.168.32.6:3306" # "10.7.1.116:33008" # 
+_IP_ = "10.7.1.116:33008" # "192.168.32.6:3306" # 
 _LOCAL_IP_ = "192.168.32.6:5002" # "0.0.0.0:5002"
 _DB_NAME_ = "db_bat_pct1"
 
@@ -31,9 +31,17 @@ PARAMETER_SET_POINT = 'value'
 
 PARAMETER_WRITE = {
     'All Wind': PARAMETER_BIAS,
-    'Burner Tilt Position Lower': PARAMETER_BIAS,
-    'Burner Tilt Position Upper': PARAMETER_BIAS,
-    'Excess Oxygen Sensor': PARAMETER_BIAS,
+    # 'Burner Tilt Position Lower': PARAMETER_SET_POINT,
+    # 'Burner Tilt Position Upper': PARAMETER_SET_POINT,
+    'Burner Tilt Position 1L': PARAMETER_SET_POINT,
+    'Burner Tilt Position 1U': PARAMETER_SET_POINT,
+    'Burner Tilt Position 2L': PARAMETER_SET_POINT,
+    'Burner Tilt Position 2U': PARAMETER_SET_POINT,
+    'Burner Tilt Position 3L': PARAMETER_SET_POINT,
+    'Burner Tilt Position 3U': PARAMETER_SET_POINT,
+    'Burner Tilt Position 4L': PARAMETER_SET_POINT,
+    'Burner Tilt Position 4U': PARAMETER_SET_POINT,
+    'Excess Oxygen Sensor': PARAMETER_SET_POINT,
     'Mill A Outlet Temperature': PARAMETER_SET_POINT,
     'Mill B Outlet Temperature': PARAMETER_SET_POINT,
     'Mill C Outlet Temperature': PARAMETER_SET_POINT,

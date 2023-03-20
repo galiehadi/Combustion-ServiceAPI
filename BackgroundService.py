@@ -456,7 +456,7 @@ def bg_write_recommendation_to_opc(MAX_BIAS_PERCENTAGE):
     Recom['value'] = Recom['current_value'] + Recom['bias_value']
 
     # Calculate O2 Set Point based on GrossMW from DCS 
-    q = f"""SELECT f_value FROM {_DB_NAME_}.cb_display disp
+    q = f"""SELECT CAST(f_value AS FLOAT) AS f_value FROM {_DB_NAME_}.cb_display disp
             LEFT JOIN {_DB_NAME_}.tb_bat_raw raw
             on disp.f_tags = raw.f_address_no 
             WHERE f_desc = "{GrossMW_tag}" """
