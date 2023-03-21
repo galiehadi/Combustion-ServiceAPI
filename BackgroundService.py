@@ -781,6 +781,35 @@ def bg_ml_runner():
             else:
                 return {'message': f"Error! Message: {ML}"}
 
+def bg_opc_tag_transfer():
+    tags_conf = pd.DataFrame(config.REALTIME_OPC_TRANSFER_TAG).T
+    
+    # Read realtime data
+    q = f"""SELECT f_address_no, f_value FROM {_DB_NAME_}.tb_bat_raw
+            WHERE f_address_no IN {tuple(np.unique(tags_conf['tb_bat_raw_tag']))} """
+    Raw = pd.read_sql(q, engine)
+    Raw = Raw.set_index('f_address_no')['f_value'].to_dict()
+
+    opc_write = []
+    now = time.strftime('%Y-%m-%d %H:%M:%S')
+
+    # Converting to opc_write
+    opc_write = []
+    message = "Success writing: "
+    for k in tags_conf.index:
+        opc_tag = tags_conf.loc[k, 'opc_tag']
+        opc_val = Raw[tags_conf.loc[k, 'tb_bat_raw_tag']]
+        opc_write.append([opc_tag, now, opc_val])
+        logging(f"Writing {opc_tag}->{opc_val}")
+        message += f"({opc_tag}->{opc_val}), "
+    opc_write = pd.DataFrame(opc_write, columns=['tag_name','ts','value'])
+    
+    # Send write command
+    opc_write.to_sql('tb_opc_write_copt', engine, if_exists='append', index=False)
+    opc_write.to_sql('tb_opc_write_history', engine, if_exists='append', index=False)
+    
+    return
+            
 if _LOCAL_MODE_:
     k = bg_ml_runner()
     print(time.strftime('%X\t'), k)

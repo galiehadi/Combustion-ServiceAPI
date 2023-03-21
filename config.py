@@ -1,7 +1,7 @@
 """
 Setting parameter untuk koneksi ke database.
 """
-__version__ = 'v1.5.6'
+__version__ = 'v1.5.7'
 
 _UNIT_CODE_ = "PCT1"
 _UNIT_NAME_ = "PLTU Pacitan 1"
@@ -49,6 +49,17 @@ PARAMETER_WRITE = {
     'Mill E Outlet Temperature': PARAMETER_SET_POINT,
     'Mill F Outlet Temperature': PARAMETER_SET_POINT,
     'Total Secondary Air Flow': PARAMETER_BIAS
+}
+
+REALTIME_OPC_TRANSFER_TAG = {
+    'Efficiency': {
+        'tb_bat_raw_tag': 'Efficiency',
+        'opc_tag':'OPC.AW1002.1E_FDF.COPT_1.RI03'
+    },
+    'Efficiency Baseline': {
+        'tb_bat_raw_tag': 'Eff_Baseline',
+        'opc_tag':'OPC.AW1002.1E_FDF.COPT_1.RI02'
+    }
 }
 
 TEMP_FOLDER = 'data/temp/'
