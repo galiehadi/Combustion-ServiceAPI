@@ -4,6 +4,7 @@ import time, sqlalchemy, requests, config, re, traceback
 from urllib.parse import quote_plus as urlparse
 from pprint import pprint
 from regional_regressor import RegionalLinearReg
+from pandas import Timestamp
 
 _UNIT_CODE_ = config._UNIT_CODE_
 _UNIT_NAME_ = config._UNIT_NAME_
@@ -13,6 +14,9 @@ _IP_ = config._IP_
 _DB_NAME_ = config._DB_NAME_
 _LOCAL_IP_ = config._LOCAL_IP_
 _LOCAL_MODE_ = False
+
+last_update_time = pd.Timestamp('2023-03-21 06:00:00')
+timeUpdate = last_update_time
 
 # Default values
 DEBUG_MODE = True
@@ -426,7 +430,7 @@ def bg_write_recommendation_to_opc(MAX_BIAS_PERCENTAGE):
         }
 
     # Reading latest recommendation
-    q = f"""SELECT gen.model_id, gen.ts, conf.f_tag_name, conf.f_description, gen.value, gen.bias_value, gen.enable_status, 
+    q = f"""SELECT gen.model_id, gen.ts, conf.f_tag_name, trim(conf.f_description) as f_description, gen.value, gen.bias_value, gen.enable_status, 
             gen.value - gen.bias_value AS current_value
             FROM tb_combustion_model_generation gen
             LEFT JOIN tb_tags_read_conf conf 
@@ -453,6 +457,17 @@ def bg_write_recommendation_to_opc(MAX_BIAS_PERCENTAGE):
         mxv = MAX_BIAS_PERCENTAGE * abs(Recom.loc[i, 'current_value']) / 100
         Recom.loc[i, 'bias_value'] = max(-mxv, Recom.loc[i, 'bias_value'])
         Recom.loc[i, 'bias_value'] = min(mxv, Recom.loc[i, 'bias_value'])
+        #cek recomendation except Excess Oxygen Sensor
+        if Recom.loc[i,'f_description'] != 'Excess Oxygen Sensor':
+            #cek last now - update
+            ts = Recom.loc[i, 'ts'] - last_update_time
+            if (ts.seconds // 60 > 4) and (Recom.loc[i, 'ts'] > last_update_time):
+                timeUpdate = Recom.loc[i, 'ts']
+            else:
+                Recom = Recom.drop(i)
+    
+    #update last update
+    last_update_time = timeUpdate
     Recom['value'] = Recom['current_value'] + Recom['bias_value']
 
     # Calculate O2 Set Point based on GrossMW from DCS 
