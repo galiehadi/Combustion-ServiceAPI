@@ -692,35 +692,27 @@ def bg_ml_runner():
     logging(f'DEBUG_MODE : {DEBUG_MODE}')
     logging(f'COPT ENABLE: {bool(ENABLE_COPT)}')
     
-    if DEBUG_MODE:
-        if ENABLE_COPT:
-            # Change DEBUG_MODE to False
-            logging(f"DEBUG_MODE is on, and COPT is on. Turning off DEBUG_MODE ...")
-            q = f"""UPDATE {_DB_NAME_}.tb_combustion_parameters
-                    SET f_default_value=0
-                    WHERE f_label="DEBUG_MODE";"""
-            with engine.connect() as conn: res = conn.execute(q)
-        else:
-            # Get latest recommendations time
-            q = f"""SELECT MAX(ts) FROM {_DB_NAME_}.tb_combustion_model_generation"""
-            df = pd.read_sql(q, engine)
-            try: LATEST_RECOMMENDATION_TIME = pd.to_datetime(df.values[0][0])
-            except Exception as e: logging(f"Error getting latest recommendation:", str(e)) 
+    if (not ENABLE_COPT) and (DEBUG_MODE):
+        # Get latest recommendations time
+        q = f"""SELECT MAX(ts) FROM {_DB_NAME_}.tb_combustion_model_generation"""
+        df = pd.read_sql(q, engine)
+        try: LATEST_RECOMMENDATION_TIME = pd.to_datetime(df.values[0][0])
+        except Exception as e: logging(f"Error getting latest recommendation:", str(e)) 
 
-            # Return if latest recommendation is under RECOM_EXEC_INTERVAL minute
-            now = pd.to_datetime(time.ctime())
-            if (now - LATEST_RECOMMENDATION_TIME) < pd.Timedelta(f'{RECOM_EXEC_INTERVAL}min'):
-                return {'message':f"Waiting to next {LATEST_RECOMMENDATION_TIME + pd.Timedelta(f'{RECOM_EXEC_INTERVAL}min') - now} min"}
-            
-            # Calling ML Recommendations to the latest recommendation
-            val = bg_get_ml_recommendation()
+        # Return if latest recommendation is under RECOM_EXEC_INTERVAL minute
+        now = pd.to_datetime(time.ctime())
+        if (now - LATEST_RECOMMENDATION_TIME) < pd.Timedelta(f'{RECOM_EXEC_INTERVAL}min'):
+            return {'message':f"Waiting to next {LATEST_RECOMMENDATION_TIME + pd.Timedelta(f'{RECOM_EXEC_INTERVAL}min') - now} min"}
 
-            if val['status'] == 'Success':
-                if not str(val['message']).startswith('Code 104'):
-                    # Sending values to OPC even with COPT turned off
-                    bg_write_recommendation_to_opc(MAX_BIAS_PERCENTAGE)
+        # Calling ML Recommendations to the latest recommendation
+        val = bg_get_ml_recommendation()
 
-            return {'message': f"Value: {val}"}
+        if val['status'] == 'Success':
+            if not str(val['message']).startswith('Code 104'):
+                # Sending values to OPC even with COPT turned off
+                bg_write_recommendation_to_opc(MAX_BIAS_PERCENTAGE)
+
+        return {'message': f"Value: {val}"}
 
     elif ENABLE_COPT:
         # Get latest recommendations time
