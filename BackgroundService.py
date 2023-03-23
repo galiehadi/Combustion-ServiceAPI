@@ -808,7 +808,6 @@ def bg_opc_tag_transfer():
         opc_tag = tags_conf.loc[k, 'opc_tag']
         opc_val = Raw[tags_conf.loc[k, 'tb_bat_raw_tag']]
         opc_write.append([opc_tag, now, opc_val])
-        logging(f"Writing {opc_tag}->{opc_val}")
         message += f"({opc_tag}->{opc_val}), "
     opc_write = pd.DataFrame(opc_write, columns=['tag_name','ts','value'])
     
@@ -816,7 +815,7 @@ def bg_opc_tag_transfer():
     opc_write.to_sql('tb_opc_write_copt', engine, if_exists='append', index=False)
     opc_write.to_sql('tb_opc_write_history', engine, if_exists='append', index=False)
     
-    return
+    return message
             
 if _LOCAL_MODE_:
     k = bg_ml_runner()
