@@ -92,7 +92,7 @@ def get_comb_tags():
     df['f_value'] = df['f_value'].astype(float).round(2).astype(str)
     text = []
     for f in df.index:
-        is_boolean = df.loc[f, 'f_data_type'] == "bool"
+        is_boolean = df.loc[f, 'f_data_type'] == "Boolean"
         if is_boolean: text.append(bool(float(df.loc[f, 'f_value'])))
         else: text.append(df.loc[f, 'f_value'] + " " + df.loc[f, 'f_units'])
     df['text'] = text
