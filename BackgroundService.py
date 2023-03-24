@@ -15,8 +15,8 @@ _DB_NAME_ = config._DB_NAME_
 _LOCAL_IP_ = config._LOCAL_IP_
 _LOCAL_MODE_ = False
 
-last_update_time = pd.Timestamp('2023-03-21 06:00:00')
-timeUpdate = last_update_time
+# last_update_time = pd.Timestamp('2023-03-21 06:00:00')
+# timeUpdate = last_update_time
 
 # Default values
 DEBUG_MODE = True
@@ -458,16 +458,16 @@ def bg_write_recommendation_to_opc(MAX_BIAS_PERCENTAGE):
         Recom.loc[i, 'bias_value'] = max(-mxv, Recom.loc[i, 'bias_value'])
         Recom.loc[i, 'bias_value'] = min(mxv, Recom.loc[i, 'bias_value'])
         #cek recomendation except Excess Oxygen Sensor
-        if Recom.loc[i,'f_description'] != 'Excess Oxygen Sensor':
-            #cek last now - update
-            ts = Recom.loc[i, 'ts'] - last_update_time
-            if (ts.seconds // 60 > 4) and (Recom.loc[i, 'ts'] > last_update_time):
-                timeUpdate = Recom.loc[i, 'ts']
-            else:
-                Recom = Recom.drop(i)
+        # if Recom.loc[i,'f_description'] != 'Excess Oxygen Sensor':
+        #     #cek last now - update
+        #     ts = Recom.loc[i, 'ts'] - last_update_time
+        #     if (ts.seconds // 60 > 4) and (Recom.loc[i, 'ts'] > last_update_time):
+        #         timeUpdate = Recom.loc[i, 'ts']
+        #     else:
+        #         Recom = Recom.drop(i)
     
     #update last update
-    last_update_time = timeUpdate
+    # last_update_time = timeUpdate
     Recom['value'] = Recom['current_value'] + Recom['bias_value']
 
     # Calculate O2 Set Point based on GrossMW from DCS 
