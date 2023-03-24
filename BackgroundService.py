@@ -4,7 +4,6 @@ import time, sqlalchemy, requests, config, re, traceback
 from urllib.parse import quote_plus as urlparse
 from pprint import pprint
 from regional_regressor import RegionalLinearReg
-from pandas import Timestamp
 
 _UNIT_CODE_ = config._UNIT_CODE_
 _UNIT_NAME_ = config._UNIT_NAME_
@@ -14,9 +13,6 @@ _IP_ = config._IP_
 _DB_NAME_ = config._DB_NAME_
 _LOCAL_IP_ = config._LOCAL_IP_
 _LOCAL_MODE_ = False
-
-# last_update_time = pd.Timestamp('2023-03-21 06:00:00')
-# timeUpdate = last_update_time
 
 # Default values
 DEBUG_MODE = True
@@ -506,6 +502,17 @@ def bg_write_recommendation_to_opc(MAX_BIAS_PERCENTAGE):
     # (skip calculation, direct bias for PCT)
     if o2_idx is not None:
         opc_write.loc[o2_idx, 'value'] = opc_write.loc[o2_idx, 'value'] - dcs_o2
+        
+    q = f"""SELECT * FROM tb_opc_write_history 
+        WHERE tag_name IN {tuple(opc_write['tag_name'])}
+        AND ts > NOW() - INTERVAL 1 HOUR"""
+    opc_write_history = pd.read_sql(q, engine)
+    opc_write_history = opc_write_history.sort_values('ts', ascending=False).groupby('tag_name').first().reset_index()
+
+    opc_write = opc_write.merge(opc_write_history[['tag_name','value']], how='left', left_on='tag_name', right_on='tag_name', validate='1:1')
+    opc_write = opc_write[opc_write['value_x'] != opc_write['value_y']]
+    opc_write = opc_write[['tag_name','ts','value_x']]
+    opc_write = opc_write.rename(columns={'value_x':'value'})
     
     opc_write.to_sql('tb_opc_write_copt', engine, if_exists='append', index=False)
     opc_write.to_sql('tb_opc_write_history', engine, if_exists='append', index=False)
