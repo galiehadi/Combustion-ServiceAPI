@@ -216,7 +216,7 @@ def bg_combustion_watchdog_check():
     if not Watchdog_safe and COPT_status == 1:
         logging('Watchdog are disconnected. Turning off COPT ...')
         try:
-            q = f"""UPDATE db_bat_rmb1.tb_bat_raw
+            q = f"""UPDATE {_DB_NAME_}.tb_bat_raw
                     SET f_value=0,f_updated_at=NOW(),f_date_rec=NOW()
                     WHERE f_address_no=(SELECT f_tag_name FROM tb_tags_read_conf ttrc 
                     WHERE f_description = "{config.DESC_ENABLE_COPT}");"""
