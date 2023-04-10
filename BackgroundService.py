@@ -301,19 +301,20 @@ def bg_safeguard_update():
         # Send alarm to OPC
         logging('Some of safeguards are violated. Turning off COPT ...')
         try:
-            q = f"""SELECT f_tags FROM {_DB_NAME_}.cb_display c
-                    WHERE f_desc = "{O2_tag}" """
-            o2_recom_tag = pd.read_sql(q, engine).values[0][0]
+            ## TODO: Ubah nilai bias COPT langsung ke master control, disesuaikan dengan nilai rekomendasi ML terakhir
+            # q = f"""SELECT f_tags FROM {_DB_NAME_}.cb_display c
+            #         WHERE f_desc = "{O2_tag}" """
+            # o2_recom_tag = pd.read_sql(q, engine).values[0][0]
             
-            # Revert all changes
-            copt_enable = df[COPTenable_name].max()
-            o2_bias = o2_current - DCS_O2.predict(mw_current)
+            ## Revert all changes
+            # copt_enable = df[COPTenable_name].max()
+            # o2_bias = o2_current - DCS_O2.predict(mw_current)
 
-            opc_write = [[o2_recom_tag, ts, o2_bias]]
-            opc_write = pd.DataFrame(opc_write, columns=['tag_name','ts','value'])
+            # opc_write = [[o2_recom_tag, ts, o2_bias]]
+            # opc_write = pd.DataFrame(opc_write, columns=['tag_name','ts','value'])
             
-            opc_write.to_sql('tb_opc_write_copt', engine, if_exists='append', index=False)
-            opc_write.to_sql('tb_opc_write_history', engine, if_exists='append', index=False)
+            # opc_write.to_sql('tb_opc_write_copt', engine, if_exists='append', index=False)
+            # opc_write.to_sql('tb_opc_write_history', engine, if_exists='append', index=False)
 
             # Append alarm history
             Alarms = S_COPT['Individual Alarm']
@@ -800,8 +801,11 @@ def bg_opc_tag_transfer():
     tags_conf = pd.DataFrame(config.REALTIME_OPC_TRANSFER_TAG).T
     
     # Read realtime data
-    q = f"""SELECT f_address_no, f_value FROM {_DB_NAME_}.tb_bat_raw
-            WHERE f_address_no IN {tuple(np.unique(tags_conf['tb_bat_raw_tag']))} """
+    # q = f"""SELECT f_address_no, f_value FROM {_DB_NAME_}.tb_bat_raw
+    #         WHERE f_address_no IN {tuple(np.unique(tags_conf['tb_bat_raw_tag']))} """
+    q = f"""SELECT "Efficiency" as f_address_no, Efficiency_Current AS f_value FROM v_tb_bat_unit_eff
+            UNION
+            SELECT "Eff_Baseline" as f_address_no, Efficiency_Baseline AS f_value FROM v_tb_bat_unit_eff """
     Raw = pd.read_sql(q, engine)
     Raw = Raw.set_index('f_address_no')['f_value'].to_dict()
 
