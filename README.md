@@ -17,3 +17,7 @@ Background services that manage the backend parts of Combustion Optimization out
 >
 > Removing limit on downloading Recommendation, adding editing description on alarm-history
 > Fixing bugs on alarm-history
+
+> **Update v1.5.6**
+>
+> Adding safeguard maximum violated feature

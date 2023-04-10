@@ -102,7 +102,7 @@ def get_parameter():
             WHERE f_label != "MAX_BIAS_PERCENTAGE" """
     df = pd.read_sql(q, engine)
     df = df.to_dict(orient='records')
-    
+
     return df
 
 def get_recommendations(payload = None, sql_interval = '1 DAY', download = False):
@@ -135,7 +135,7 @@ def get_recommendations(payload = None, sql_interval = '1 DAY', download = False
         df_dict = df.astype(str).to_dict('records')
         
         last_recommendation = str(df['timestamp'].max())
-        
+
         return df_dict, last_recommendation
 
 def get_rules_header():
@@ -189,7 +189,9 @@ def get_specific_alarm_history(alarmID):
         return {}
 
 def get_rules_detailed(rule_id):
-    q = f"""SELECT f_rule_dtl_id AS ruleDetailId, f_rule_hdr_id AS ruleHeaderId, f_sequence AS sequence, f_bracket_open AS bracketOpen, f_bracket_close AS bracketClose, f_tag_sensor AS tagSensor 
+    q = f"""SELECT f_rule_dtl_id AS ruleDetailId, f_rule_hdr_id AS ruleHeaderId, 
+            f_sequence AS sequence, f_bracket_open AS bracketOpen, f_bracket_close AS bracketClose, 
+            f_tag_sensor AS tagSensor, f_max_violated AS maxViolated 
             FROM {_DB_NAME_}.tb_combustion_rules_dtl
             WHERE f_rule_hdr_id = {rule_id} """
     df = pd.read_sql(q, engine)
@@ -268,7 +270,7 @@ def get_all_parameter():
 
 def post_rule(payload):
     ret = {'Status': 'Failed'}
-    
+
     if type(payload) is not dict: 
        return ret
     if len(payload.keys()) == 0: 
@@ -277,7 +279,9 @@ def post_rule(payload):
        return ret
 
     q = f"""INSERT INTO
-            {_DB_NAME_}.tb_combustion_rules_dtl(f_rule_hdr_id, f_rule_descr, f_tag_sensor, f_rules, f_operator, f_unit, f_limit_high, f_limit_low, f_sequence, f_bracket_open, f_bracket_close, f_is_active, f_updated_at)
+            {_DB_NAME_}.tb_combustion_rules_dtl(f_rule_hdr_id, f_rule_descr, f_tag_sensor, f_rules, f_operator, 
+                f_unit, f_limit_high, f_limit_low, f_sequence, f_bracket_open, 
+                f_bracket_close, f_violated_count, f_max_violated, f_is_active, f_updated_at)
             VALUES """
 
     Payload = payload['detailRule']
@@ -289,14 +293,16 @@ def post_rule(payload):
         sequence = P['sequence']
         # tagSensor = [P['tagSensor'][:-1].split('(')[0] if '(' in P['tagSensor'] else P['tagSensor']][0]
         tagSensor = P['tagSensor'].split(' -- ')[0] if ' -- ' in P['tagSensor'] else P['tagSensor']
+        ruleHeaderId = 20
+        maxViolated = 'NULL'
         if 'ruleHeaderId' in P.keys(): ruleHeaderId = P['ruleHeaderId']
-        else: ruleHeaderId = 20
+        if 'maxViolated' in P.keys(): maxViolated = P['maxViolated']
 
-        r = f"""( {ruleHeaderId} , NULL, '{tagSensor}', NULL, NULL, NULL, NULL, NULL, {sequence}, '{bracketOpen}', '{bracketClose}', 1, NOW()),"""
+        r = f"""( {ruleHeaderId} , NULL, '{tagSensor}', NULL, NULL, NULL, NULL, NULL, {sequence}, '{bracketOpen}', '{bracketClose}', 0, {maxViolated}, 1, NOW()),"""
         q += r
         evaluate += f"{bracketOpen}{tagSensor}{bracketClose} "
         tags_used.append(tagSensor)
-        
+
     q = q[:-1]
 
     # Value check
@@ -313,18 +319,18 @@ def post_rule(payload):
         Safeguard_status = eval(evaluate)
         qdel = f"""DELETE FROM {_DB_NAME_}.tb_combustion_rules_dtl
                    WHERE f_rule_hdr_id={ruleHeaderId}"""
-        
+
         with engine.connect() as conn:
             red = conn.execute(qdel)
             res = conn.execute(q)
-        
+
         return {'Status':'Success'}
 
     except Exception as E:
         logging(f"Error evaluating a new rule: {evaluate}")
         logging(f"{E}")
         return {'Status': str(E)}
-    
+
 
 def post_parameter(payload):
     parameterID = payload['id']
@@ -332,11 +338,11 @@ def post_parameter(payload):
     defaultValue = payload['value']
 
     q = f"""INSERT INTO
-			{_DB_NAME_}.tb_combustion_parameters (f_parameter_id,f_label,f_default_value,f_is_active,f_updated_at)
+            {_DB_NAME_}.tb_combustion_parameters (f_parameter_id,f_label,f_default_value,f_is_active,f_updated_at)
             VALUES ({parameterID},'{label}',{defaultValue},1,NOW());
          """
     qdel = f"""DELETE FROM {_DB_NAME_}.tb_combustion_parameters
-	           WHERE f_parameter_id={parameterID}"""
+               WHERE f_parameter_id={parameterID}"""
 
     with engine.connect() as conn:
         red = conn.execute(qdel)
@@ -351,9 +357,9 @@ def post_alarm(payload):
     }
     for key in ['alarmId', 'desc']:
         if key not in payload.keys(): 
-            ret['Message']: f"Key `{key}` not in payload."
+            ret['Message'] = f"Key `{key}` not in payload."
             return ret
-    
+
     q = f"""UPDATE tb_combustion_alarm_history
             SET f_desc = "{payload['desc']}"
             WHERE f_int_id = "{payload['alarmId']}" """
@@ -362,3 +368,4 @@ def post_alarm(payload):
         ret['Message'] = f'Success changing {rett.rowcount} line(s).'
         ret['Status'] = 'Success'
     return ret
+    

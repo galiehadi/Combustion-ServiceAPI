@@ -83,11 +83,14 @@ def bg_combustion_safeguard_check():
     t0 = time.time()
     q = f"""SELECT
                 NOW() AS timestamp,
+                rule.f_rule_dtl_id,
                 rule.f_tag_sensor,
                 conf.f_description,
                 rule.f_bracket_open,
                 raw.f_value,
-                rule.f_bracket_close
+                rule.f_bracket_close,
+                rule.f_violated_count,
+                rule.f_max_violated
             FROM
                 {_DB_NAME_}.tb_combustion_rules_dtl rule
             LEFT JOIN {_DB_NAME_}.tb_bat_raw raw ON
@@ -101,55 +104,68 @@ def bg_combustion_safeguard_check():
                 rule.f_is_active = 1
             ORDER BY
                 rule.f_sequence"""
-    sg = pd.read_sql(q, engine)
-    ts = sg['timestamp'].max()
 
-    Safeguard_status = True
-    Safeguard_text = ''
-    Alarms = []
-    Individual_safeguard_values = []
-    
-    for i in sg.index:
-        _, tagname, description, bracketOpen, value, bracketClose = sg.iloc[i]
-        bracketClose = bracketClose.replace('==','=').replace("=","==")
-        Safeguard_text += f"{bracketOpen}{value}{bracketClose} "
+    with engine.connect() as conn:
+        sg = pd.read_sql(q, conn)
+        sg['f_max_violated'] = sg['f_max_violated'].fillna(2)
+        ts = sg['timestamp'].max()
 
-        bracketClose_ = bracketClose.replace('AND','').replace('OR','')
-        setValue = bracketClose_
-        while setValue.count(')') > setValue.count('('):
-            setValue = setValue[::-1].replace(')','',1)[::-1]
-        individualRule = f"{bracketOpen}{value}{bracketClose_} ".lower()
-        individualAlarm = {
-            'f_timestamp': ts,
-            'f_desc': 'Safeguard',
-            'f_set_value': f"{bracketOpen}{description}{bracketClose_}",
-            'f_actual_value':str(value),
-            'f_rule_header': 20
-        }
-        try: 
-            if not eval(individualRule): Alarms.append(individualAlarm)
-            
-            individualValues = {
-                'sequence': i,
-                'setValue': setValue, 
-                'actualValue': round(float(value),3),
-                'tagDescription': description.strip(),
-                'status': eval(individualRule)
+        Safeguard_status = True
+        Safeguard_text = ''
+        Alarms = []
+        Individual_safeguard_values = []
+
+        for i in sg.index:
+            _, sgId, tagname, description, bracketOpen, value, bracketClose, violatedCount, maxViolated = sg.iloc[i]
+            bracketClose = bracketClose.replace('==','=').replace("=","==")
+            Safeguard_text += f"{bracketOpen}{value}{bracketClose} "
+
+            bracketClose_ = bracketClose.replace('AND','').replace('OR','')
+            setValue = bracketClose_
+            while setValue.count(')') > setValue.count('('):
+                setValue = setValue[::-1].replace(')','',1)[::-1]
+            individualRule = f"{bracketOpen}{value}{bracketClose_} ".lower()
+            individualAlarm = {
+                'f_timestamp': ts,
+                'f_desc': 'Safeguard',
+                'f_set_value': f"{bracketOpen}{description}{bracketClose_}",
+                'f_actual_value':str(value),
+                'f_rule_header': 20
             }
-            Individual_safeguard_values.append(individualValues)
-        except:
-            Alarms.append(individualAlarm)
+            try: 
+                status = eval(individualRule)
+                if status: 
+                    violatedCount = 0
+                else: 
+                    violatedCount += 1
+                    Alarms.append(individualAlarm)
 
-    Safeguard_text = Safeguard_text.lower()
-    Safeguard_status = eval(Safeguard_text)
+                q = f"""UPDATE {_DB_NAME_}.tb_combustion_rules_dtl
+                        SET f_violated_count = {violatedCount}
+                        WHERE f_rule_dtl_id = {sgId}"""
+                conn.execute(q)
+                
+                individualValues = {
+                    'sequence': i,
+                    'setValue': setValue, 
+                    'actualValue': round(float(value),3),
+                    'tagDescription': description.strip(),
+                    'status': violatedCount < maxViolated
+                }
+                Individual_safeguard_values.append(individualValues)
+            except:
+                Alarms.append(individualAlarm)
 
-    ret = {
-        'Safeguard Status': Safeguard_status,
-        'Execution time': str(round(time.time() - t0,3)) + ' sec',
-        'Individual Alarm': Alarms,
-        'Individual Safeguard': Individual_safeguard_values,
-        'Safeguard Text': Safeguard_text
-    }
+        Safeguard_text = Safeguard_text.lower()
+        Safeguard_status = eval(Safeguard_text)
+
+        ret = {
+            'Safeguard Status': Safeguard_status,
+            'Execution time': str(round(time.time() - t0,3)) + ' sec',
+            'Individual Alarm': Alarms,
+            'Individual Safeguard': Individual_safeguard_values,
+            'Safeguard Text': Safeguard_text
+        }
     return ret
 
 def bg_sootblow_safeguard_check():
