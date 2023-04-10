@@ -3,13 +3,13 @@ Setting parameter untuk koneksi ke database.
 """
 __version__ = 'v1.5.6'
 
-_UNIT_CODE_ = "RBG1"
-_UNIT_NAME_ = "PLTU Rembang Unit 20"
+_UNIT_CODE_ = "RBG2"
+_UNIT_NAME_ = "PLTU Rembang Unit 10"
 _USER_ = "bat_copt"
 _PASS_ = "P@ssw0rd"
-_IP_ = "192.168.2.10" # "10.7.1.116:33011" # "10.7.33.241:3307" # 
-_LOCAL_IP_ = "192.168.2.10:5002" # "0.0.0.0:5002"
-_DB_NAME_ = "db_bat_rmb1"
+_IP_ = "192.168.2.11" # "10.7.1.116:33011" # "10.7.33.241:3307" # 
+_LOCAL_IP_ = "192.168.2.11:5002" # "0.0.0.0:5002"
+_DB_NAME_ = "db_bat_rmb2"
 
 "Setting parameter nama variabel"
 
