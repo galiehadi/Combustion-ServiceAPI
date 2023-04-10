@@ -114,6 +114,7 @@ def bg_combustion_safeguard_check():
         Safeguard_text = ''
         Alarms = []
         Individual_safeguard_values = []
+        individual_errors = False
 
         for i in sg.index:
             _, sgId, tagname, description, bracketOpen, value, bracketClose, violatedCount, maxViolated = sg.iloc[i]
@@ -154,10 +155,12 @@ def bg_combustion_safeguard_check():
                 }
                 Individual_safeguard_values.append(individualValues)
             except:
+                individual_errors = True
                 Alarms.append(individualAlarm)
 
         Safeguard_text = Safeguard_text.lower()
-        Safeguard_status = eval(Safeguard_text)
+        if individual_errors: Safeguard_status = eval(Safeguard_text)
+        else: Safeguard_status = pd.DataFrame(Individual_safeguard_values)['status'].min()
 
         ret = {
             'Safeguard Status': Safeguard_status,
