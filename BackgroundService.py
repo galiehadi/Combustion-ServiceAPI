@@ -150,7 +150,7 @@ def bg_combustion_safeguard_check():
                     'setValue': setValue, 
                     'actualValue': round(float(value),3),
                     'tagDescription': description.strip(),
-                    'status': violatedCount < maxViolated
+                    'status': bool(violatedCount < maxViolated)
                 }
                 Individual_safeguard_values.append(individualValues)
             except:
