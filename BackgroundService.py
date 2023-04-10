@@ -82,14 +82,18 @@ def bg_update_notification():
     return
 
 def bg_combustion_safeguard_check():
+    # TODO: Tambahi konfigurasi cek max_violated atau tidak
     t0 = time.time()
     q = f"""SELECT
                 NOW() AS timestamp,
+                rule.f_rule_dtl_id,
                 rule.f_tag_sensor,
                 conf.f_description,
                 rule.f_bracket_open,
                 CAST(raw.f_value AS float) as f_value,
-                rule.f_bracket_close
+                rule.f_bracket_close,
+                rule.f_violated_count,
+                rule.f_max_violated
             FROM
                 {_DB_NAME_}.tb_combustion_rules_dtl rule
             LEFT JOIN {_DB_NAME_}.tb_bat_raw raw ON
@@ -103,55 +107,72 @@ def bg_combustion_safeguard_check():
                 rule.f_is_active = 1
             ORDER BY
                 rule.f_sequence"""
-    sg = pd.read_sql(q, engine)
-    ts = sg['timestamp'].max()
+    with engine.connect() as conn:
+        sg = pd.read_sql(q, conn)
+        sg['f_max_violated'] = sg['f_max_violated'].fillna(2)
+        ts = sg['timestamp'].max()
 
-    Safeguard_status = True
-    Safeguard_text = ''
-    Alarms = []
-    Individual_safeguard_values = []
-    
-    for i in sg.index:
-        _, tagname, description, bracketOpen, value, bracketClose = sg.iloc[i]
-        bracketClose = bracketClose.replace('==','=').replace("=","==")
-        Safeguard_text += f"{bracketOpen}{value}{bracketClose} "
+        Safeguard_status = True
+        Safeguard_text = ''
+        Alarms = []
+        Individual_safeguard_values = []
+        individual_errors = False
+        
+        for i in sg.index:
+            _, sgId, tagname, description, bracketOpen, value, bracketClose, violatedCount, maxViolated = sg.iloc[i]
+            bracketClose = bracketClose.replace('==','=').replace("=","==")
+            Safeguard_text += f"{bracketOpen}{value}{bracketClose} "
 
-        bracketClose_ = bracketClose.replace('AND','').replace('OR','')
-        setValue = bracketClose_
-        while setValue.count(')') > setValue.count('('):
-            setValue = setValue[::-1].replace(')','',1)[::-1]
-        individualRule = f"{bracketOpen}{value}{bracketClose_} ".lower()
-        individualAlarm = {
-            'f_timestamp': ts,
-            'f_desc': 'Safeguard',
-            'f_set_value': f"{bracketOpen}{description}{bracketClose_}",
-            'f_actual_value':str(value),
-            'f_rule_header': 20
-        }
-        try: 
-            if not eval(individualRule): Alarms.append(individualAlarm)
-            
-            individualValues = {
-                'sequence': i,
-                'setValue': setValue, 
-                'actualValue': round(float(value),3),
-                'tagDescription': description.strip(),
-                'status': eval(individualRule)
+            bracketClose_ = bracketClose.replace('AND','').replace('OR','')
+            setValue = bracketClose_
+            while setValue.count(')') > setValue.count('('):
+                setValue = setValue[::-1].replace(')','',1)[::-1]
+            individualRule = f"{bracketOpen}{value}{bracketClose_} ".lower()
+            individualAlarm = {
+                'f_timestamp': ts,
+                'f_desc': 'Safeguard',
+                'f_set_value': f"{bracketOpen}{description}{bracketClose_}",
+                'f_actual_value':str(value),
+                'f_rule_header': 20
             }
-            Individual_safeguard_values.append(individualValues)
-        except:
-            Alarms.append(individualAlarm)
+            try: 
+                status = eval(individualRule)
+                if status: 
+                    violatedCount = 0
+                else: 
+                    violatedCount += 1
+                    Alarms.append(individualAlarm)
 
-    Safeguard_text = Safeguard_text.lower()
-    Safeguard_status = eval(Safeguard_text)
+                q = f"""UPDATE {_DB_NAME_}.tb_combustion_rules_dtl
+                        SET f_violated_count = {violatedCount}
+                        WHERE f_rule_dtl_id = {sgId}"""
+                conn.execute(q)
+                
+                individualValues = {
+                    'sequence': i,
+                    'setValue': setValue, 
+                    'actualValue': round(float(value),3),
+                    'tagDescription': description.strip(),
+                    'status': bool(violatedCount < maxViolated)
+                }
+                Individual_safeguard_values.append(individualValues)
+            except:
+                individual_errors = True
+                Alarms.append(individualAlarm)
 
-    ret = {
-        'Safeguard Status': Safeguard_status,
-        'Execution time': str(round(time.time() - t0,3)) + ' sec',
-        'Individual Alarm': Alarms,
-        'Individual Safeguard': Individual_safeguard_values,
-        'Safeguard Text': Safeguard_text
-    }
+        Safeguard_text = Safeguard_text.lower()
+        if individual_errors or not(config.SAFEGUARD_USING_MAX_VIOLATED): 
+            Safeguard_status = eval(Safeguard_text)
+        else: 
+            Safeguard_status = pd.DataFrame(Individual_safeguard_values)['status'].min()
+
+        ret = {
+            'Safeguard Status': Safeguard_status,
+            'Execution time': str(round(time.time() - t0,3)) + ' sec',
+            'Individual Alarm': Alarms,
+            'Individual Safeguard': Individual_safeguard_values,
+            'Safeguard Text': Safeguard_text
+        }
     return ret
 
 def bg_sootblow_safeguard_check():
@@ -520,84 +541,6 @@ def bg_write_recommendation_to_opc(MAX_BIAS_PERCENTAGE):
     logging(f'Write to OPC: \n{opc_write}\n')
     return 'Done!'
     
-# # Write recommendation slowly with reading realtime data
-# def bg_write_recommendation_to_opc1(MAX_BIAS_PERCENTAGE):
-#     # Enable Status
-#     q = f"""SELECT conf.f_description, raw.f_value FROM {_DB_NAME_}.tb_bat_raw raw
-#             LEFT JOIN {_DB_NAME_}.tb_tags_read_conf conf
-#             ON raw.f_address_no = conf.f_tag_name
-#             WHERE conf.f_category LIKE "%ENABLE%" 
-#             AND conf.f_is_active = 1
-#             """
-#     Enable_status_df = pd.read_sql(q, engine).set_index('f_description')['f_value']
-#     Enable_status_df = Enable_status_df.replace(np.nan, 0)
-
-#     # Enable tags
-#     q = f"""SELECT f_category, f_description, f_tag_name FROM {_DB_NAME_}.tb_tags_read_conf
-#             WHERE f_category = "Recommendation" """
-#     Write_tags = pd.read_sql(q, engine)
-
-#     Enable_status = {}
-#     for c in [config.DESC_ENABLE_COPT_BT, config.DESC_ENABLE_COPT_SEC, config.DESC_ENABLE_COPT_MOT]:
-#         status = int(Enable_status_df[c]) if c in Enable_status_df.index else 0
-#         tags = Write_tags[Write_tags['f_category'] == c]['f_tag_name'].values.tolist() if c in np.unique(Write_tags['f_category']) else []
-#         Enable_status[c] = {
-#             'status': status,
-#             'tag_lists': tags
-#         }
-
-#     # Limit recommendations to +- MAX_BIAS_PERCENTAGE %
-#     q = f"""SELECT gen.model_id, gen.ts, conf.f_tag_name, conf.f_description, gen.value, gen.bias_value, gen.enable_status, 
-#             (CASE WHEN gen.tag_name = "Total Secondary Air Flow" THEN AVG(raw.f_value*2) ELSE raw.f_value END) AS current_value
-#             FROM tb_combustion_model_generation gen
-#             LEFT JOIN tb_tags_read_conf conf
-#             ON gen.tag_name = conf.f_description 
-#             LEFT JOIN tb_bat_raw raw 
-#             ON conf.f_tag_name = raw.f_address_no 
-#             WHERE gen.ts = (SELECT MAX(ts) FROM tb_combustion_model_generation gen)
-#             AND conf.f_category != "Recommendation"
-#             AND conf.f_is_active = 1
-#             GROUP BY gen.tag_name"""
-#     Recom = pd.read_sql(q, engine)
-#     Recom['bias_value'] = Recom['value'] - Recom['current_value']
-
-#     o2_idx = None
-#     # Limit recommendation to MAX_BIAS_PERCENTAGE %
-#     for i in Recom.index:
-#         mxv = MAX_BIAS_PERCENTAGE * abs(Recom.loc[i, 'current_value']) / 100
-#         Recom.loc[i, 'bias_value'] = max(-mxv, Recom.loc[i, 'bias_value'])
-#         Recom.loc[i, 'bias_value'] = min(mxv, Recom.loc[i, 'bias_value'])
-#         if 'Oxygen' in Recom.loc[i, 'f_description']: o2_idx = i
-#         elif 'O2' in Recom.loc[i, 'f_description']: o2_idx = i
-#     Recom['value'] = Recom['current_value'] + Recom['bias_value']
-
-#     # Calculate O2 Set Point based on GrossMW from DCS 
-#     # (skip calculation, direct bias for PCT)
-#     # q = f"""SELECT f_value FROM {_DB_NAME_}.cb_display disp
-#     #         LEFT JOIN {_DB_NAME_}.tb_bat_raw raw
-#     #         on disp.f_tags = raw.f_address_no 
-#     #         WHERE f_desc = "generator_gross_load" """
-#     # dcs_mw = pd.read_sql(q, engine).values[0][0]
-#     # dcs_o2 = DCS_O2.predict(dcs_mw)
-
-#     opc_write = Recom.merge(Write_tags, how='left', left_on='f_description', right_on='f_description')[['f_tag_name_y','ts','value']].dropna()
-#     opc_write.columns = ['tag_name','ts','value']
-#     opc_write['ts'] = pd.to_datetime(time.ctime())
-
-#     # (skip calculation, direct bias for PCT)
-#     # if o2_idx is not None:
-#     #     opc_write.loc[o2_idx, 'value'] = opc_write.loc[o2_idx, 'value'] - dcs_o2
-
-#     # Remove tags that disabled partially
-#     for C in Enable_status.keys():
-#         if not bool(Enable_status[C]['status']):
-#             tags = Enable_status[C]['tag_lists']
-#             opc_write = opc_write.drop(index = opc_write[opc_write['tag_name'].isin(tags)].index)
-    
-#     opc_write.to_sql('tb_opc_write', engine, if_exists='append', index=False)
-#     opc_write.to_sql('tb_opc_write_history', engine, if_exists='append', index=False)
-#     logging(f'Write to OPC: {opc_write}')
-#     return 'Done!'
 
 def bg_get_ml_model_status():
     q = f"""SELECT message FROM {_DB_NAME_}.tb_combustion_model_message 

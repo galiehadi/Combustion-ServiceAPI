@@ -1,7 +1,7 @@
 """
 Setting parameter untuk koneksi ke database.
 """
-__version__ = 'v1.5.8'
+__version__ = 'v1.6.0'
 
 _UNIT_CODE_ = "PCT1"
 _UNIT_NAME_ = "PLTU Pacitan 1"
@@ -16,6 +16,7 @@ _DB_NAME_ = "db_bat_pct1"
 WATCHDOG_TAG = "OPC.AW1002.1LSB.WATCHDOG_STS.BO02"
 SAFEGUARD_TAG = "SAFEGUARD:COMBUSTION"
 SAFEGUARD_SOPT_TAG = "SAFEGUARD:SOOTBLOW"
+SAFEGUARD_USING_MAX_VIOLATED = False
 
 DESC_ENABLE_COPT = "COMBUSTION ENABLE"
 DESC_ENABLE_COPT_BT = "BURN TILT ENABLE"
@@ -64,8 +65,8 @@ REALTIME_OPC_TRANSFER_TAG = {
 
 TEMP_FOLDER = 'data/temp/'
 
-"Setting Karakter O2 di DCS"
+"Setting Karakter O2 di DCS berdasarkan Steam Flow"
 
-DCS_Xp = [ 0,   45,   77,   91,  100 ] # Dalam persen
+# DCS_Xp = [ 0,   45,   77,   91,  100 ] # Dalam persen
 DCS_X  = [ 0, 400, 600, 800, 1025, 1200 ]
 DCS_Y  = [ 10, 6, 4.5, 3.5, 3, 2.5 ]
