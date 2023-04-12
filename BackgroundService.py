@@ -19,6 +19,7 @@ DEBUG_MODE = True
 dcs_x = config.DCS_X
 dcs_y = config.DCS_Y
 DCS_O2 = RegionalLinearReg(dcs_x, dcs_y)
+LATEST_STATUS = {}
 
 con = f"mysql+mysqlconnector://{_USER_}:{_PASS_}@{_IP_}/{_DB_NAME_}"
 engine = sqlalchemy.create_engine(con)
@@ -27,6 +28,17 @@ engine = sqlalchemy.create_engine(con)
 def logging(text):
     t = time.strftime('%Y-%m-%d %X (%z)')
     print(f"[{t}] - {text}")
+    
+def vardiff(var):
+    if type(var) is not dict:
+        return True
+    else:
+        for k in var.keys():
+            if k not in LATEST_STATUS.keys():
+                LATEST_STATUS[k] = var[k]
+                return True
+            else:
+                return bool(var[k] == LATEST_STATUS[k])
 
 def bg_update_notification():
     # Get status enable now
@@ -163,7 +175,7 @@ def bg_combustion_safeguard_check():
         else: Safeguard_status = pd.DataFrame(Individual_safeguard_values)['status'].min()
 
         ret = {
-            'Safeguard Status': Safeguard_status,
+            'Safeguard Status': bool(Safeguard_status),
             'Execution time': str(round(time.time() - t0,3)) + ' sec',
             'Individual Alarm': Alarms,
             'Individual Safeguard': Individual_safeguard_values,
@@ -208,7 +220,7 @@ def bg_sootblow_safeguard_check():
     Safeguard_status = eval(Safeguard_text)
 
     ret = {
-        'Safeguard Status': Safeguard_status,
+        'Safeguard Status': bool(Safeguard_status),
         'Execution time': str(round(time.time() - t0,3)) + ' sec',
         'Individual Alarm': Alarms
     }
@@ -693,9 +705,11 @@ def bg_ml_runner():
         RECOM_EXEC_INTERVAL = int(parameters['RECOM_EXEC_INTERVAL'])
     if 'DEBUG_MODE' in parameters.index:
         DEBUG_MODE = False if (str(int(parameters['DEBUG_MODE'])).lower() in ['0','false',0]) else True
-    
-    logging(f'DEBUG_MODE : {DEBUG_MODE}')
-    logging(f'COPT ENABLE: {bool(ENABLE_COPT)}')
+        
+    if vardiff({'DEBUG_MODE': DEBUG_MODE}):
+        logging(f'DEBUG MODE: {bool(DEBUG_MODE)}')    
+    if vardiff({'ENABLE_COPT': ENABLE_COPT}):
+        logging(f'COPT ENABLE: {bool(ENABLE_COPT)}')
     
     if DEBUG_MODE:
         if ENABLE_COPT:
