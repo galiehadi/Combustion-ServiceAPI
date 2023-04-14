@@ -73,16 +73,18 @@ def get_o2_converter_parameters():
         return [1, 0]
 
 def get_comb_tags():
-    q = f"""SELECT cd.f_desc, cd.f_data_type, tbr.f_value, cd.f_units FROM {_DB_NAME_}.cb_display cd 
+    q = f"""SELECT cd.f_desc, tbr.f_data_type, tbr.f_value, cd.f_units FROM {_DB_NAME_}.cb_display cd 
             LEFT JOIN {_DB_NAME_}.tb_bat_raw tbr 
             ON cd.f_tags = tbr.f_address_no 
             ORDER BY cd.f_desc ASC"""
     df = pd.read_sql(q, engine)
+    df['f_data_type'] = df['f_data_type'].astype(str)
+    df['f_units'] = df['f_units'].astype(str)
     df['f_value'] = df['f_value'].astype(str)
-    df = df.replace('None',0)
-    df = df.set_index('f_desc')
 
-    # df.loc['excess_o2','f_value']  = float(df.loc['excess_o2','f_value']) * 1.6844264 + 0.16792374
+    df['f_value'] = df['f_value'].replace('None',0)
+    df = df.replace('None','')
+    df = df.set_index('f_desc')
 
     o2_intercept, o2_bias = get_o2_converter_parameters()
     df.loc['excess_o2','f_value']  = float(df.loc['excess_o2','f_value']) * o2_intercept + o2_bias
@@ -130,11 +132,12 @@ def get_recommendations(payload = None, sql_interval = '1 DAY', download = False
         return save_to_path(df, "recommendation")
 
     else:
+        last_recommendation = str(df['timestamp'].max())
+        
         for c in df.columns[-3:]:
             df[c] = np.round(df[c], 3)
         df_dict = df.astype(str).to_dict('records')
         
-        last_recommendation = str(df['timestamp'].max())
         
         return df_dict, last_recommendation
 
@@ -172,6 +175,7 @@ def get_alarm_history(page=0, limit=40, payload=None, download=False):
     df = pd.read_sql(q, engine)
     if download:
         return save_to_path(df)
+    df['actualValue'] = df['actualValue'].astype(float).round(3)
     df_dict = df.astype(str).to_dict('records')
     return df_dict
 
@@ -188,13 +192,87 @@ def get_specific_alarm_history(alarmID):
         return {}
 
 def get_rules_detailed(rule_id):
+    # q = f"""SELECT f_rule_dtl_id AS ruleDetailId, f_rule_hdr_id AS ruleHeaderId, f_sequence AS sequence, f_bracket_open AS bracketOpen, f_bracket_close AS bracketClose, f_tag_sensor AS tagSensor 
+    #         FROM {_DB_NAME_}.tb_combustion_rules_dtl
+    #         WHERE f_rule_hdr_id = {rule_id} """
+    # df = pd.read_sql(q, engine)
+    # df_dict = df.to_dict('records')
+    # ret = {
+    #     'detailRule': df_dict
+    # }
+    q = f"""SELECT hd.f_rule_hdr_id AS ruleId, hd.f_rule_descr AS ruleHdr, hd.f_used_preset_id AS presetUsed, 
+        DATE_FORMAT(hd.f_updated_at, '%Y-%m-%d %H:%i:%s') AS ruleUpdate, pr.f_preset_id AS presetId, pr.f_preset_desc AS presetDesc, 
+        pr.f_is_active AS isActive, DATE_FORMAT(pr.f_updated_at, '%Y-%m-%d %H:%i:%s') AS presetUpdate, pr.f_updated_by AS updatedBy, u.f_full_name 
+        FROM {_DB_NAME_}.tb_combustion_rules_hdr hd LEFT JOIN {_DB_NAME_}.tb_combustion_rules_preset_hdr pr ON pr.f_rule_id = hd.f_rule_hdr_id 
+        LEFT JOIN {_DB_NAME_}.tb_um_users u ON u.f_user_id = pr.f_updated_by 
+        WHERE f_rule_hdr_id = {rule_id}"""
+    df = pd.read_sql(q, engine)
+
+    for i in df.index:
+        if df.loc[i, 'isActive'] == 1:
+            presetId = df.loc[i, 'presetId']
+            updateBy = df.loc[i, 'f_full_name'].upper()
+            presetHdr = df.loc[i, 'presetDesc']
+            updateAt = df.loc[i, 'ruleUpdate']
+            ruleHdr = df.loc[i, 'ruleHdr']
+            isActive = df.loc[i, 'isActive']
+
     q = f"""SELECT f_rule_dtl_id AS ruleDetailId, f_rule_hdr_id AS ruleHeaderId, f_sequence AS sequence, f_bracket_open AS bracketOpen, f_bracket_close AS bracketClose, f_tag_sensor AS tagSensor 
             FROM {_DB_NAME_}.tb_combustion_rules_dtl
-            WHERE f_rule_hdr_id = {rule_id} """
-    df = pd.read_sql(q, engine)
-    df_dict = df.to_dict('records')
+            WHERE /*f_rule_hdr_id = {rule_id} AND*/ f_preset_id = {presetId} """
+    list = pd.read_sql(q, engine)
+
     ret = {
-        'detailRule': df_dict
+        'presetList': df[['presetId', 'presetDesc', 'isActive', 'presetUpdate', 'ruleId', 'updatedBy']].to_dict('records'),
+        'updateBy': updateBy,
+        'presetHdr': presetHdr,
+        'isActive': int(isActive),
+        'detailRule': list.to_dict('records'),
+        'updateAt': updateAt,
+        'currentPresetId': int(presetId),
+        'label': ruleHdr,
+        'ruleId': int(rule_id)
+    }
+    return ret
+
+def get_rules_preset_detailed(rule_id, preset_id):
+    ret = {'Status': 'Failed'}
+    
+    rule_id = int(rule_id)
+    preset_id = int(preset_id)
+
+    q = f"""SELECT hd.f_rule_hdr_id AS ruleId, hd.f_rule_descr AS ruleHdr, hd.f_used_preset_id AS presetUsed, 
+        DATE_FORMAT(hd.f_updated_at, '%Y-%m-%d %H:%i:%s') AS ruleUpdate, pr.f_preset_id AS presetId, pr.f_preset_desc AS presetDesc, 
+        pr.f_is_active AS isActive, DATE_FORMAT(pr.f_updated_at, '%Y-%m-%d %H:%i:%s') AS presetUpdate, pr.f_updated_by AS updatedBy, u.f_full_name 
+        FROM {_DB_NAME_}.tb_combustion_rules_hdr hd LEFT JOIN {_DB_NAME_}.tb_combustion_rules_preset_hdr pr ON pr.f_rule_id = hd.f_rule_hdr_id 
+        LEFT JOIN {_DB_NAME_}.tb_um_users u ON u.f_user_id = pr.f_updated_by 
+        WHERE f_rule_hdr_id = {rule_id}"""
+    df = pd.read_sql(q, engine)
+
+    for i in df.index:
+        if df.loc[i, 'presetId'] == preset_id:
+            presetId = df.loc[i, 'presetId']
+            updateBy = df.loc[i, 'f_full_name'].upper()
+            presetHdr = df.loc[i, 'presetDesc']
+            updateAt = df.loc[i, 'ruleUpdate']
+            ruleHdr = df.loc[i, 'ruleHdr']
+            isActive = df.loc[i, 'isActive']
+
+    q = f"""SELECT f_rule_dtl_id AS ruleDetailId, f_rule_hdr_id AS ruleHeaderId, f_sequence AS sequence, f_bracket_open AS bracketOpen, f_bracket_close AS bracketClose, f_tag_sensor AS tagSensor 
+            FROM {_DB_NAME_}.tb_combustion_rules_dtl
+            WHERE /*f_rule_hdr_id = {rule_id} AND*/ f_preset_id = {preset_id} """
+    list = pd.read_sql(q, engine)
+
+    ret = {
+        'presetList': df[['presetId', 'presetDesc', 'isActive', 'presetUpdate', 'ruleId', 'updatedBy']].to_dict('records'),
+        'updateBy': updateBy,
+        'presetHdr': presetHdr,
+        'isActive': int(isActive),
+        'detailRule': list.to_dict('records'),
+        'updateAt': updateAt,
+        'currentPresetId': int(presetId),
+        'label': ruleHdr,
+        'ruleId': int(rule_id)
     }
     return ret
 
@@ -215,15 +293,14 @@ def get_all_rules_detailed():
             LEFT JOIN {_DB_NAME_}.tb_combustion_rules_hdr hdr ON
                 hdr.f_rule_hdr_id = rule.f_rule_hdr_id
             WHERE
-                hdr.f_rule_hdr_id > 0; """
+                hdr.f_rule_hdr_id > 0 AND rule.f_is_active = 1; """
     df = pd.read_sql(q, engine)
     return save_to_path(df, "rules")
 
 def get_tags_rule():
     q = f"""SELECT "" AS tagKKS, f_tag_name AS tagSensor, 
             f_description AS tagDescription FROM tb_tags_read_conf ttrc 
-            WHERE f_tag_use IN ("COPT", "SOPT+COPT", "COPT+SOPT")
-            AND f_is_active != 0"""
+            WHERE f_is_active != 0"""
     df = pd.read_sql(q, engine)
     df['tagDescription'] = [f.strip() for f in df['tagDescription'].astype(str)]
     df['tagDescription'] = df['tagSensor'] + ' -- ' + df['tagDescription']
@@ -276,9 +353,11 @@ def post_rule(payload):
        return ret
 
     q = f"""INSERT INTO
-            {_DB_NAME_}.tb_combustion_rules_dtl(f_rule_hdr_id, f_rule_descr, f_tag_sensor, f_rules, f_operator, f_unit, f_limit_high, f_limit_low, f_sequence, f_bracket_open, f_bracket_close, f_is_active, f_updated_at)
+            {_DB_NAME_}.tb_combustion_rules_dtl(f_rule_hdr_id, f_rule_descr, f_tag_sensor, f_rules, f_operator, f_unit, f_limit_high, f_limit_low, f_sequence, f_bracket_open, f_bracket_close, f_is_active, f_updated_at, f_preset_id)
             VALUES """
 
+    preset_id = int(payload['presetId'])
+    is_active = int(payload['isActive'])
     Payload = payload['detailRule']
     evaluate = ''
     tags_used = []
@@ -291,7 +370,7 @@ def post_rule(payload):
         if 'ruleHeaderId' in P.keys(): ruleHeaderId = P['ruleHeaderId']
         else: ruleHeaderId = 20
 
-        r = f"""( {ruleHeaderId} , NULL, '{tagSensor}', NULL, NULL, NULL, NULL, NULL, {sequence}, '{bracketOpen}', '{bracketClose}', 1, NOW()),"""
+        r = f"""( {ruleHeaderId} , NULL, '{tagSensor}', NULL, NULL, NULL, NULL, NULL, {sequence}, '{bracketOpen}', '{bracketClose}', {is_active}, NOW(), {preset_id} ),"""
         q += r
         evaluate += f"{bracketOpen}{tagSensor}{bracketClose} "
         tags_used.append(tagSensor)
@@ -311,7 +390,7 @@ def post_rule(payload):
     try:
         Safeguard_status = eval(evaluate)
         qdel = f"""DELETE FROM {_DB_NAME_}.tb_combustion_rules_dtl
-                   WHERE f_rule_hdr_id={ruleHeaderId}"""
+                   WHERE f_rule_hdr_id={ruleHeaderId} AND f_preset_id={preset_id} """
         
         with engine.connect() as conn:
             red = conn.execute(qdel)
@@ -323,6 +402,73 @@ def post_rule(payload):
         logging(f"Error evaluating a new rule: {evaluate}")
         logging(f"{E}")
         return {'Status': str(E)}
+
+
+def post_rule_preset(payload):
+    ret = {'Status': 'Failed'}
+
+    if type(payload) is not dict: 
+       return ret
+    if len(payload.keys()) == 0: 
+       return ret
+    
+    preset_desc = payload.get('presetDesc')
+    rule_id = payload.get('ruleId')
+    update_by = payload.get('updateBy')
+    current_time = time.strftime('%Y-%m-%d %H:%M:%S')
+
+    q = f"""INSERT INTO 
+        {_DB_NAME_}.tb_combustion_rules_preset_hdr(f_preset_desc, f_rule_id, f_is_active, f_updated_at, f_updated_by) 
+        VALUES ('{preset_desc}', {rule_id}, 0, '{current_time}', {update_by})"""
+    
+    qGetId = f"""SELECT f_preset_id from {_DB_NAME_}.tb_combustion_rules_preset_hdr 
+        WHERE f_preset_desc='{preset_desc}' AND f_updated_at='{current_time}'"""
+           
+    try:
+        with engine.connect() as conn:
+            red = conn.execute(q)
+            res = conn.execute(qGetId)
+            result_value = res.fetchone()[0]
+        payload['presetId'] = int(result_value)
+        payload['isActive'] = 0
+
+        return payload
+
+    except Exception as E:
+        logging(f"{E}")
+        return {'Status': str(E)}
+
+
+def post_preset_activated(payload):
+    ruleId = payload['ruleId']
+    presetId = payload['presetId']
+
+    qp = f"""UPDATE {_DB_NAME_}.tb_combustion_rules_preset_hdr SET f_is_active = 1 
+        WHERE f_rule_id={ruleId} AND f_preset_id={presetId}"""
+    qpReset = f"""UPDATE {_DB_NAME_}.tb_combustion_rules_preset_hdr SET f_is_active = 0 
+        WHERE f_rule_id={ruleId} /*AND f_preset_id={presetId}*/"""
+
+    q = f"""UPDATE {_DB_NAME_}.tb_combustion_rules_dtl SET f_is_active = 1 
+        WHERE f_rule_hdr_id={ruleId} AND f_preset_id={presetId}"""
+    qReset = f"""UPDATE {_DB_NAME_}.tb_combustion_rules_dtl SET f_is_active = 0 
+        WHERE f_rule_hdr_id={ruleId} /*AND f_preset_id={presetId}*/"""
+    
+    qRuleHdr = f"""UPDATE {_DB_NAME_}.tb_combustion_rules_hdr SET f_used_preset_id = {presetId} 
+        WHERE f_rule_hdr_id={ruleId}"""
+    
+    try:
+        with engine.connect() as conn:
+            rek = conn.execute(qpReset)
+            reb = conn.execute(qp)
+            res = conn.execute(qReset)
+            red = conn.execute(q)
+            reh = conn.execute(qRuleHdr)
+
+        return {'Status':'Success'}
+
+    except Exception as E:
+        logging(f"{E}")
+        return {'Status': str(E)}
     
 
 def post_parameter(payload):
@@ -331,11 +477,11 @@ def post_parameter(payload):
     defaultValue = payload['value']
 
     q = f"""INSERT INTO
-			{_DB_NAME_}.tb_combustion_parameters (f_parameter_id,f_label,f_default_value,f_is_active,f_updated_at)
+            {_DB_NAME_}.tb_combustion_parameters (f_parameter_id,f_label,f_default_value,f_is_active,f_updated_at)
             VALUES ({parameterID},'{label}',{defaultValue},1,NOW());
          """
     qdel = f"""DELETE FROM {_DB_NAME_}.tb_combustion_parameters
-	           WHERE f_parameter_id={parameterID}"""
+               WHERE f_parameter_id={parameterID}"""
 
     with engine.connect() as conn:
         red = conn.execute(qdel)
@@ -350,7 +496,7 @@ def post_alarm(payload):
     }
     for key in ['alarmId', 'desc']:
         if key not in payload.keys(): 
-            ret['Message']: f"Key `{key}` not in payload."
+            ret['Message']= f"Key `{key}` not in payload."
             return ret
     
     q = f"""UPDATE tb_combustion_alarm_history
