@@ -119,6 +119,24 @@ def rule(ruleID):
         data['message'] = str(E)
     return data
 
+@app.route('/service/copt/bat/combustion/rule/preset/detailed/<ruleId>/<presetId>')
+def rule_preset_detailed(ruleId,presetId):
+    
+    data = {
+        "message": "Failed",
+        "total": 1,
+        "limit": 1,
+        "page": 0
+    }
+
+    try:
+        data['object'] = get_rules_preset_detailed(ruleId, presetId)
+        data['message'] = 'Success'
+    except Exception as E:
+        data['object'] = []
+        data['message'] = str(E)
+    return data
+
 @app.route('/service/copt/bat/combustion/tags/rule')
 def tags_rule():
     data = {
@@ -158,6 +176,49 @@ def input_rule():
     payload = dict(request.get_json())
 
     objects = post_rule(payload)
+
+    data = {
+        "message": "Success" if (objects['Status'] == "Success") else "Failed",
+        "total": 1,
+        "limit": 1,
+        "page": 0,
+        "object": objects
+    }
+    data = jsonify(data)
+    if (objects['Status'] != "Success"):
+        return make_response(jsonify(data), 404)
+    return data
+
+@app.route('/service/copt/bat/combustion/rule/preset', methods=['POST'])
+def input_rule_preset():
+    payload = dict(request.get_json())
+
+    data = {
+        "message": "Failed",
+        "total": 1,
+        "limit": 1,
+        "page": 0
+    }
+    objects = {"Status": "Failed"}
+
+    preset = post_rule_preset(payload)
+    if 'Status' in preset.keys():
+       return make_response(jsonify(data), 404)
+    else:
+        objects = post_rule(preset)
+
+    data["object"] = objects
+    data["message"] = "Success" if (objects['Status'] == "Success") else "Failed"
+    data = jsonify(data)
+    if (objects['Status'] != "Success"):
+        return make_response(jsonify(data), 404)
+    return data
+
+@app.route('/service/copt/bat/combustion/rule/preset/activated', methods=['POST'])
+def input_rule_preset_activated():
+    payload = dict(request.get_json())
+
+    objects = post_preset_activated(payload)
 
     data = {
         "message": "Success" if (objects['Status'] == "Success") else "Failed",
