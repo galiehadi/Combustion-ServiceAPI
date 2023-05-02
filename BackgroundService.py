@@ -43,7 +43,7 @@ def bg_update_notification():
     q = f"""SELECT notif.f_value from tb_tags_read_conf conf
         LEFT JOIN tb_bat_notif notif 
         ON conf.f_tag_name = notif.f_address_no 
-        WHERE conf.f_description = "COMBUSTION ENABLE"
+        WHERE conf.f_description = "{config.DESC_ENABLE_COPT}"
         ORDER BY notif.f_updated_at DESC LIMIT 1"""
     df_status_last = pd.read_sql(q, engine)
     status_last = int(df_status_last['f_value'].values[0])
@@ -233,7 +233,7 @@ def bg_combustion_watchdog_check():
             opc_write = [[alarm_tag, pd.to_datetime('now'), 101]]
             opc_write = pd.DataFrame(opc_write, columns=['tag_name','ts','value'])
 
-            opc_write.to_sql('tb_opc_write', engine, if_exists='append', index=False)
+            opc_write.to_sql('tb_opc_write_copt', engine, if_exists='append', index=False)
             opc_write.to_sql('tb_opc_write_history', engine, if_exists='append', index=False)
         except Exception as E:
             logging(f"Failed to turn off COPT: {E}")
@@ -311,7 +311,7 @@ def bg_safeguard_update():
             opc_write = [[o2_recom_tag, ts, o2_bias]]
             opc_write = pd.DataFrame(opc_write, columns=['tag_name','ts','value'])
             
-            opc_write.to_sql('tb_opc_write', engine, if_exists='append', index=False)
+            opc_write.to_sql('tb_opc_write_copt', engine, if_exists='append', index=False)
             opc_write.to_sql('tb_opc_write_history', engine, if_exists='append', index=False)
 
             # Append alarm history
@@ -337,7 +337,7 @@ def bg_safeguard_update():
 
             # Write alarm 1 to DCS 
             # TODO: To be determined the alarm rules
-            q = f"""SELECT * FROM tb_opc_write
+            q = f"""SELECT * FROM tb_opc_write_copt
                 WHERE tag_name = (SELECT f_tag_name AS tag_name FROM {_DB_NAME_}.tb_tags_read_conf ttwc 
                 WHERE f_description = "{config.DESC_ALARM}")
                 ORDER BY ts DESC LIMIT 10 """
@@ -349,15 +349,15 @@ def bg_safeguard_update():
                     raise(ValueError(f"""Alarm has been executed on "{Latest_OPC_alarm_timestamp}". Waiting on OPC Writers to execute. """))
             
             # Force truncate opc write and re-disable COPT
-            q = f"""SELECT COUNT(*) FROM tb_opc_write"""
+            q = f"""SELECT COUNT(*) FROM tb_opc_write_copt"""
             opc_write_count = pd.read_sql(q, engine).values[0][0]
             
             with engine.connect() as conn:
                 if opc_write_count > 15:
-                    q = f"TRUNCATE tb_opc_write"
+                    q = f"TRUNCATE tb_opc_write_copt"
                     conn.execute()
                 
-                for table in ['tb_opc_write','tb_opc_write_history']:
+                for table in ['tb_opc_write_copt','tb_opc_write_history']:
                     q = f"""INSERT IGNORE INTO {table}
                             SELECT f_tag_name AS tag_name, NOW() AS ts, 1 AS value FROM tb_tags_read_conf ttwc 
                             WHERE f_description = "{config.DESC_ALARM}" """
@@ -380,7 +380,7 @@ def bg_safeguard_update():
             if alarm_current_status != 0:
                 # Write back alarm 0 to DCS 
                 # TODO: To be determined the alarm rules
-                for table in ['tb_opc_write','tb_opc_write_history']:
+                for table in ['tb_opc_write_copt','tb_opc_write_history']:
                     q = f"""INSERT IGNORE INTO {_DB_NAME_}.{table}
                             SELECT f_tag_name AS tag_name, NOW() AS ts, 0 AS value FROM {_DB_NAME_}.tb_tags_read_conf ttwc 
                             WHERE f_description = "{config.DESC_ALARM}" """
@@ -491,7 +491,7 @@ def bg_write_recommendation_to_opc(MAX_BIAS_PERCENTAGE):
     # if o2_idx is not None:
     #     opc_write.loc[o2_idx, 'value'] = opc_write.loc[o2_idx, 'value'] - dcs_o2
     
-    opc_write.to_sql('tb_opc_write', engine, if_exists='append', index=False)
+    opc_write.to_sql('tb_opc_write_copt', engine, if_exists='append', index=False)
     opc_write.to_sql('tb_opc_write_history', engine, if_exists='append', index=False)
     logging(f'Write to OPC: \n{opc_write}\n')
     return 'Done!'
