@@ -1,7 +1,7 @@
 """
 Setting parameter untuk koneksi ke database.
 """
-__version__ = 'v1.5.6'
+__version__ = 'v1.5.7'
 
 _UNIT_CODE_ = "PCT2"
 _UNIT_NAME_ = "PLTU Pacitan 2"
