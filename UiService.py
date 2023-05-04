@@ -368,6 +368,7 @@ def post_rule(payload):
         # tagSensor = [P['tagSensor'][:-1].split('(')[0] if '(' in P['tagSensor'] else P['tagSensor']][0]
         tagSensor = P['tagSensor'].split(' -- ')[0] if ' -- ' in P['tagSensor'] else P['tagSensor']
         if 'ruleHeaderId' in P.keys(): ruleHeaderId = P['ruleHeaderId']
+        if 'id' in P.keys(): ruleHeaderId = P['id']
         else: ruleHeaderId = 20
 
         r = f"""( {ruleHeaderId} , NULL, '{tagSensor}', NULL, NULL, NULL, NULL, NULL, {sequence}, '{bracketOpen}', '{bracketClose}', {is_active}, NOW(), {preset_id} ),"""
@@ -392,7 +393,11 @@ def post_rule(payload):
         qdel = f"""DELETE FROM {_DB_NAME_}.tb_combustion_rules_dtl
                    WHERE f_rule_hdr_id={ruleHeaderId} AND f_preset_id={preset_id} """
         
+        qup = f"""UPDATE {_DB_NAME_}.tb_combustion_rules_preset_hdr SET f_updated_at = NOW() 
+                    WHERE f_rule_id={ruleHeaderId} AND f_preset_id={preset_id} """
+        
         with engine.connect() as conn:
+            rup = conn.execute(qup)
             red = conn.execute(qdel)
             res = conn.execute(q)
         
