@@ -238,7 +238,8 @@ def bg_combustion_watchdog_check():
     if not Watchdog_safe and COPT_status == 1:
         logging('Watchdog are disconnected. Turning off COPT ...')
         try:
-            q = f"""UPDATE tb_bat_raw
+
+            q = f"""UPDATE {_DB_NAME_}.tb_bat_raw
                     SET f_value=0,f_updated_at=NOW(),f_date_rec=NOW()
                     WHERE f_address_no=(SELECT f_tag_name FROM tb_tags_read_conf ttrc 
                     WHERE f_description = "{config.DESC_ENABLE_COPT}");"""
@@ -248,7 +249,7 @@ def bg_combustion_watchdog_check():
             Alarm = pd.DataFrame(Alarm, columns=["f_timestamp", "f_desc", "f_set_value", "f_actual_value", "f_rule_header"])
             Alarm.to_sql('tb_combustion_alarm_history', engine, if_exists='append', index=False)
 
-            q = f"""SELECT f_tag_name FROM tb_tags_read_conf
+            q = f"""SELECT f_tag_name FROM {_DB_NAME_}.tb_tags_read_conf
                     WHERE f_description = "Combustion Alarm" """
             alarm_tag = pd.read_sql(q, engine).values[0][0]
 
@@ -259,7 +260,14 @@ def bg_combustion_watchdog_check():
             opc_write.to_sql('tb_opc_write_history', engine, if_exists='append', index=False)
         except Exception as E:
             logging(f"Failed to turn off COPT: {E}")
-    
+
+    if not Watchdog_safe and COPT_status == 0:
+        qin = f"""INSERT INTO
+                {_DB_NAME_}.tb_combustion_alarm_history (f_timestamp,f_desc,f_set_value,f_actual_value,f_rule_header)
+                VALUES (NOW(),'Watchdog','WatchdogStatus == 1',Watchdog_status, 0);"""
+        with engine.connect() as conn:
+            rin = conn.execute(qin)
+
     ret = {
         'Watchdog Status': Watchdog_status,
         'Execution time': str(round(time.time() - t0,3)) + ' sec'
