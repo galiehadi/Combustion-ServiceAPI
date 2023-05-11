@@ -370,7 +370,7 @@ def post_rule(payload):
         sequence = P['sequence']
         # tagSensor = [P['tagSensor'][:-1].split('(')[0] if '(' in P['tagSensor'] else P['tagSensor']][0]
         tagSensor = P['tagSensor'].split(' -- ')[0] if ' -- ' in P['tagSensor'] else P['tagSensor']
-        if 'id' in P.keys(): ruleHeaderId = P['id']
+        if 'ruleHeaderId' in P.keys(): ruleHeaderId = P['ruleHeaderId']
         else: ruleHeaderId = 20
 
         r = f"""( {ruleHeaderId} , NULL, '{tagSensor}', NULL, NULL, NULL, NULL, NULL, {sequence}, '{bracketOpen}', '{bracketClose}', {is_active}, NOW(), {preset_id} ),"""
