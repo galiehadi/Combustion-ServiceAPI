@@ -192,8 +192,6 @@ def get_specific_alarm_history(alarmID):
         return {}
 
 def get_rules_detailed(rule_id):
-    # q = f""""""
-
     # q = f"""SELECT f_rule_dtl_id AS ruleDetailId, f_rule_hdr_id AS ruleHeaderId, f_sequence AS sequence, f_bracket_open AS bracketOpen, f_bracket_close AS bracketClose, f_tag_sensor AS tagSensor 
     #         FROM {_DB_NAME_}.tb_combustion_rules_dtl
     #         WHERE f_rule_hdr_id = {rule_id} """
@@ -296,7 +294,7 @@ def get_all_rules_detailed():
             LEFT JOIN {_DB_NAME_}.tb_combustion_rules_hdr hdr ON
                 hdr.f_rule_hdr_id = rule.f_rule_hdr_id
             WHERE
-                hdr.f_rule_hdr_id > 0; """
+                hdr.f_rule_hdr_id > 0 AND rule.f_is_active = 1; """
     df = pd.read_sql(q, engine)
     return save_to_path(df, "rules")
 
@@ -407,6 +405,73 @@ def post_rule(payload):
 
     except Exception as E:
         logging(f"Error evaluating a new rule: {evaluate}")
+        logging(f"{E}")
+        return {'Status': str(E)}
+
+
+def post_rule_preset(payload):
+    ret = {'Status': 'Failed'}
+
+    if type(payload) is not dict: 
+       return ret
+    if len(payload.keys()) == 0: 
+       return ret
+    
+    preset_desc = payload.get('presetDesc')
+    rule_id = payload.get('ruleId')
+    update_by = payload.get('updateBy')
+    current_time = time.strftime('%Y-%m-%d %H:%M:%S')
+
+    q = f"""INSERT INTO 
+        {_DB_NAME_}.tb_combustion_rules_preset_hdr(f_preset_desc, f_rule_id, f_is_active, f_updated_at, f_updated_by) 
+        VALUES ('{preset_desc}', {rule_id}, 0, '{current_time}', {update_by})"""
+    
+    qGetId = f"""SELECT f_preset_id from {_DB_NAME_}.tb_combustion_rules_preset_hdr 
+        WHERE f_preset_desc='{preset_desc}' AND f_updated_at='{current_time}'"""
+           
+    try:
+        with engine.connect() as conn:
+            red = conn.execute(q)
+            res = conn.execute(qGetId)
+            result_value = res.fetchone()[0]
+        payload['presetId'] = int(result_value)
+        payload['isActive'] = 0
+
+        return payload
+
+    except Exception as E:
+        logging(f"{E}")
+        return {'Status': str(E)}
+
+
+def post_preset_activated(payload):
+    ruleId = payload['ruleId']
+    presetId = payload['presetId']
+
+    qp = f"""UPDATE {_DB_NAME_}.tb_combustion_rules_preset_hdr SET f_is_active = 1 
+        WHERE f_rule_id={ruleId} AND f_preset_id={presetId}"""
+    qpReset = f"""UPDATE {_DB_NAME_}.tb_combustion_rules_preset_hdr SET f_is_active = 0 
+        WHERE f_rule_id={ruleId} /*AND f_preset_id={presetId}*/"""
+
+    q = f"""UPDATE {_DB_NAME_}.tb_combustion_rules_dtl SET f_is_active = 1 
+        WHERE f_rule_hdr_id={ruleId} AND f_preset_id={presetId}"""
+    qReset = f"""UPDATE {_DB_NAME_}.tb_combustion_rules_dtl SET f_is_active = 0 
+        WHERE f_rule_hdr_id={ruleId} /*AND f_preset_id={presetId}*/"""
+    
+    qRuleHdr = f"""UPDATE {_DB_NAME_}.tb_combustion_rules_hdr SET f_used_preset_id = {presetId} 
+        WHERE f_rule_hdr_id={ruleId}"""
+    
+    try:
+        with engine.connect() as conn:
+            rek = conn.execute(qpReset)
+            reb = conn.execute(qp)
+            res = conn.execute(qReset)
+            red = conn.execute(q)
+            reh = conn.execute(qRuleHdr)
+
+        return {'Status':'Success'}
+
+    except Exception as E:
         logging(f"{E}")
         return {'Status': str(E)}
     

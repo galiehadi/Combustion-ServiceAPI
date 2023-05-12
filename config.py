@@ -1,28 +1,28 @@
 """
 Setting parameter untuk koneksi ke database.
 """
-__version__ = 'v1.6.1'
+__version__ = 'v1.5.6'
 
-_UNIT_CODE_ = "PCT1"
-_UNIT_NAME_ = "PLTU Pacitan 1"
-_USER_ = "bat_copt" 
-_PASS_ = "P@ssw0rd" 
-_IP_ = "192.168.32.6:3306" # "10.7.1.116:33008" # 
-_LOCAL_IP_ = "192.168.32.6:5002" # "0.0.0.0:5002"
-_DB_NAME_ = "db_bat_pct1" 
+_UNIT_CODE_ = "PCT2"
+_UNIT_NAME_ = "PLTU Pacitan 2"
+_USER_ = "bat_copt"
+_PASS_ = "P@ssw0rd"
+_IP_ = "192.168.32.7:3306" # "10.7.1.116:33009" # 
+_LOCAL_IP_ = "192.168.31.97:5002" # "192.168.32.7:5002" # "0.0.0.0:5002"
+_DB_NAME_ = "db_bat_pct2"
 
 # "Setting parameter nama variabel"
 
-WATCHDOG_TAG = "OPC.AW1002.1LSB.WATCHDOG_STS.BO02"
+WATCHDOG_TAG = "OPC.AW2002.2LSB.WATCHDOG_STS.BO02"
 SAFEGUARD_TAG = "SAFEGUARD:COMBUSTION"
 SAFEGUARD_SOPT_TAG = "SAFEGUARD:SOOTBLOW"
 SAFEGUARD_USING_MAX_VIOLATED = False
 
-DESC_ENABLE_COPT = "COMBUSTION ENABLE"
+DESC_ENABLE_COPT = "COPT ENABLE STATUS"
 DESC_ENABLE_COPT_BT = "BURN TILT ENABLE"
 DESC_ENABLE_COPT_SEC = "SEC AIR ENABLE"
 DESC_ENABLE_COPT_MOT = "MILL OUTLET ENABLE"
-DESC_ALARM = "PB ENABLE COPT"
+DESC_ALARM = "SAFEGUARD FAIL ALARM"
 
 TAG_COPT_ISCALLING = "TAG:COPT_is_calling"
 OXYGEN_STEADY_STATE_LEVEL = 0.01
@@ -32,17 +32,9 @@ PARAMETER_SET_POINT = 'value'
 
 PARAMETER_WRITE = {
     'All Wind': PARAMETER_BIAS,
-    # 'Burner Tilt Position Lower': PARAMETER_SET_POINT,
-    # 'Burner Tilt Position Upper': PARAMETER_SET_POINT,
-    'Burner Tilt Position 1L': PARAMETER_SET_POINT,
-    'Burner Tilt Position 1U': PARAMETER_SET_POINT,
-    'Burner Tilt Position 2L': PARAMETER_SET_POINT,
-    'Burner Tilt Position 2U': PARAMETER_SET_POINT,
-    'Burner Tilt Position 3L': PARAMETER_SET_POINT,
-    'Burner Tilt Position 3U': PARAMETER_SET_POINT,
-    'Burner Tilt Position 4L': PARAMETER_SET_POINT,
-    'Burner Tilt Position 4U': PARAMETER_SET_POINT,
-    'Excess Oxygen Sensor': PARAMETER_SET_POINT,
+    'Burner Tilt Position Lower': PARAMETER_BIAS,
+    'Burner Tilt Position Upper': PARAMETER_BIAS,
+    'Excess Oxygen Sensor': PARAMETER_BIAS,
     'Mill A Outlet Temperature': PARAMETER_SET_POINT,
     'Mill B Outlet Temperature': PARAMETER_SET_POINT,
     'Mill C Outlet Temperature': PARAMETER_SET_POINT,

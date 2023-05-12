@@ -249,7 +249,7 @@ def bg_combustion_watchdog_check():
             Alarm = pd.DataFrame(Alarm, columns=["f_timestamp", "f_desc", "f_set_value", "f_actual_value", "f_rule_header"])
             Alarm.to_sql('tb_combustion_alarm_history', engine, if_exists='append', index=False)
 
-            q = f"""SELECT f_tag_name FROM {_DB_NAME_}.tb_tags_read_conf
+            q = f"""SELECT f_tag_name FROM tb_tags_read_conf
                     WHERE f_description = "Combustion Alarm" """
             alarm_tag = pd.read_sql(q, engine).values[0][0]
 
@@ -380,12 +380,12 @@ def bg_safeguard_update():
                     raise(ValueError(f"""Alarm has been executed on "{Latest_OPC_alarm_timestamp}". Waiting on OPC Writers to execute. """))
             
             # Force truncate opc write and re-disable COPT
-            q = f"""SELECT COUNT(*) FROM tb_opc_write_copt"""
+            q = f"""SELECT COUNT(*) FROM tb_opc_write"""
             opc_write_count = pd.read_sql(q, engine).values[0][0]
             
             with engine.connect() as conn:
                 if opc_write_count > 15:
-                    q = f"TRUNCATE tb_opc_write_copt"
+                    q = f"TRUNCATE tb_opc_write"
                     conn.execute()
                 
                 for table in ['tb_opc_write_copt','tb_opc_write_history']:
