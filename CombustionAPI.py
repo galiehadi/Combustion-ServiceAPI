@@ -328,6 +328,21 @@ def get_ml_recommendation():
         data['message'] = str(E)
     return data
 
+@app.route('/service/copt/bat/combustion/background/opc_tag_transfer')
+def opc_tag_transfer():
+    ret = {
+        "message": "Failed",
+        "total": 1,
+        "limit": 1,
+        "page": 0
+    }
+    
+    try:
+        ret['message'] = bg_opc_tag_transfer()
+    except Exception as E:
+        ret['message'] = str(traceback.format_exc())
+    return ret
+
 # ================================== Machine Learning Service ================================== #
 @app.route('/service/copt/bat/combustion/background/runner')
 def ml_runner():

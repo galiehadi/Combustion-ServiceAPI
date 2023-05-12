@@ -92,7 +92,7 @@ def get_comb_tags():
     df['f_value'] = df['f_value'].astype(float).round(2).astype(str)
     text = []
     for f in df.index:
-        is_boolean = df.loc[f, 'f_data_type'] == "bool"
+        is_boolean = df.loc[f, 'f_data_type'] == "Boolean"
         if is_boolean: text.append(bool(float(df.loc[f, 'f_value'])))
         else: text.append(df.loc[f, 'f_value'] + " " + df.loc[f, 'f_units'])
     df['text'] = text
@@ -200,6 +200,7 @@ def get_rules_detailed(rule_id):
     # ret = {
     #     'detailRule': df_dict
     # }
+
     q = f"""SELECT hd.f_rule_hdr_id AS ruleId, hd.f_rule_descr AS ruleHdr, hd.f_used_preset_id AS presetUsed, 
         DATE_FORMAT(hd.f_updated_at, '%Y-%m-%d %H:%i:%s') AS ruleUpdate, pr.f_preset_id AS presetId, pr.f_preset_desc AS presetDesc, 
         pr.f_is_active AS isActive, DATE_FORMAT(pr.f_updated_at, '%Y-%m-%d %H:%i:%s') AS presetUpdate, pr.f_updated_by AS updatedBy, u.f_full_name 
@@ -390,9 +391,13 @@ def post_rule(payload):
     try:
         Safeguard_status = eval(evaluate)
         qdel = f"""DELETE FROM {_DB_NAME_}.tb_combustion_rules_dtl
-                   WHERE f_rule_hdr_id={ruleHeaderId} AND f_preset_id={preset_id} """
+                   WHERE f_rule_hdr_id={ruleHeaderId}  AND f_preset_id={preset_id} """
+        
+        qup = f"""UPDATE {_DB_NAME_}.tb_combustion_rules_preset_hdr SET f_updated_at = NOW() 
+                    WHERE f_rule_id={ruleHeaderId} AND f_preset_id={preset_id} """
         
         with engine.connect() as conn:
+            rup = conn.execute(qup)
             red = conn.execute(qdel)
             res = conn.execute(q)
         
@@ -438,6 +443,73 @@ def post_rule_preset(payload):
         logging(f"{E}")
         return {'Status': str(E)}
 
+
+def post_preset_activated(payload):
+    ruleId = payload['ruleId']
+    presetId = payload['presetId']
+
+    qp = f"""UPDATE {_DB_NAME_}.tb_combustion_rules_preset_hdr SET f_is_active = 1 
+        WHERE f_rule_id={ruleId} AND f_preset_id={presetId}"""
+    qpReset = f"""UPDATE {_DB_NAME_}.tb_combustion_rules_preset_hdr SET f_is_active = 0 
+        WHERE f_rule_id={ruleId} /*AND f_preset_id={presetId}*/"""
+
+    q = f"""UPDATE {_DB_NAME_}.tb_combustion_rules_dtl SET f_is_active = 1 
+        WHERE f_rule_hdr_id={ruleId} AND f_preset_id={presetId}"""
+    qReset = f"""UPDATE {_DB_NAME_}.tb_combustion_rules_dtl SET f_is_active = 0 
+        WHERE f_rule_hdr_id={ruleId} /*AND f_preset_id={presetId}*/"""
+    
+    qRuleHdr = f"""UPDATE {_DB_NAME_}.tb_combustion_rules_hdr SET f_used_preset_id = {presetId} 
+        WHERE f_rule_hdr_id={ruleId}"""
+    
+    try:
+        with engine.connect() as conn:
+            rek = conn.execute(qpReset)
+            reb = conn.execute(qp)
+            res = conn.execute(qReset)
+            red = conn.execute(q)
+            reh = conn.execute(qRuleHdr)
+
+        return {'Status':'Success'}
+
+    except Exception as E:
+        logging(f"{E}")
+        return {'Status': str(E)}
+    
+
+def post_rule_preset(payload):
+    ret = {'Status': 'Failed'}
+
+    if type(payload) is not dict: 
+       return ret
+    if len(payload.keys()) == 0: 
+       return ret
+    
+    preset_desc = payload.get('presetDesc')
+    rule_id = payload.get('ruleId')
+    update_by = payload.get('updateBy')
+    current_time = time.strftime('%Y-%m-%d %H:%M:%S')
+
+    q = f"""INSERT INTO 
+        {_DB_NAME_}.tb_combustion_rules_preset_hdr(f_preset_desc, f_rule_id, f_is_active, f_updated_at, f_updated_by) 
+        VALUES ('{preset_desc}', {rule_id}, 0, '{current_time}', {update_by})"""
+    
+    qGetId = f"""SELECT f_preset_id from {_DB_NAME_}.tb_combustion_rules_preset_hdr 
+        WHERE f_preset_desc='{preset_desc}' AND f_updated_at='{current_time}'"""
+           
+    try:
+        with engine.connect() as conn:
+            red = conn.execute(q)
+            res = conn.execute(qGetId)
+            result_value = res.fetchone()[0]
+        payload['presetId'] = int(result_value)
+        payload['isActive'] = 0
+
+        return payload
+
+    except Exception as E:
+        logging(f"{E}")
+        return {'Status': str(E)}
+    
 
 def post_preset_activated(payload):
     ruleId = payload['ruleId']
