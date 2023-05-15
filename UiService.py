@@ -218,7 +218,9 @@ def get_rules_detailed(rule_id):
             ruleHdr = df.loc[i, 'ruleHdr']
             isActive = df.loc[i, 'isActive']
 
-    q = f"""SELECT f_rule_dtl_id AS ruleDetailId, f_rule_hdr_id AS ruleHeaderId, f_sequence AS sequence, f_bracket_open AS bracketOpen, f_bracket_close AS bracketClose, f_tag_sensor AS tagSensor 
+    q = f"""SELECT f_rule_dtl_id AS ruleDetailId, f_rule_hdr_id AS ruleHeaderId, 
+            f_sequence AS sequence, f_bracket_open AS bracketOpen, f_bracket_close AS bracketClose, 
+            f_tag_sensor AS tagSensor, f_max_violated AS maxViolated 
             FROM {_DB_NAME_}.tb_combustion_rules_dtl
             WHERE /*f_rule_hdr_id = {rule_id} AND*/ f_preset_id = {presetId} """
     list = pd.read_sql(q, engine)
@@ -259,9 +261,11 @@ def get_rules_preset_detailed(rule_id, preset_id):
             ruleHdr = df.loc[i, 'ruleHdr']
             isActive = df.loc[i, 'isActive']
 
-    q = f"""SELECT f_rule_dtl_id AS ruleDetailId, f_rule_hdr_id AS ruleHeaderId, f_sequence AS sequence, f_bracket_open AS bracketOpen, f_bracket_close AS bracketClose, f_tag_sensor AS tagSensor 
+    q = f"""SELECT f_rule_dtl_id AS ruleDetailId, f_rule_hdr_id AS ruleHeaderId, 
+            f_sequence AS sequence, f_bracket_open AS bracketOpen, f_bracket_close AS bracketClose, 
+            f_tag_sensor AS tagSensor, f_max_violated AS maxViolated 
             FROM {_DB_NAME_}.tb_combustion_rules_dtl
-            WHERE /*f_rule_hdr_id = {rule_id} AND*/ f_preset_id = {preset_id} """
+            WHERE /*f_rule_hdr_id = {rule_id} AND*/ f_preset_id = {presetId} """
     list = pd.read_sql(q, engine)
 
     ret = {
@@ -345,7 +349,7 @@ def get_all_parameter():
 
 def post_rule(payload):
     ret = {'Status': 'Failed'}
-    
+
     if type(payload) is not dict: 
        return ret
     if len(payload.keys()) == 0: 
@@ -354,7 +358,9 @@ def post_rule(payload):
        return ret
 
     q = f"""INSERT INTO
-            {_DB_NAME_}.tb_combustion_rules_dtl(f_rule_hdr_id, f_rule_descr, f_tag_sensor, f_rules, f_operator, f_unit, f_limit_high, f_limit_low, f_sequence, f_bracket_open, f_bracket_close, f_is_active, f_updated_at, f_preset_id)
+            {_DB_NAME_}.tb_combustion_rules_dtl(f_rule_hdr_id, f_rule_descr, f_tag_sensor, f_rules, f_operator, 
+                f_unit, f_limit_high, f_limit_low, f_sequence, f_bracket_open, 
+                f_bracket_close, f_violated_count, f_max_violated, f_is_active, f_updated_at, f_preset_id)
             VALUES """
 
     preset_id = int(payload['presetId'])
@@ -368,14 +374,17 @@ def post_rule(payload):
         sequence = P['sequence']
         # tagSensor = [P['tagSensor'][:-1].split('(')[0] if '(' in P['tagSensor'] else P['tagSensor']][0]
         tagSensor = P['tagSensor'].split(' -- ')[0] if ' -- ' in P['tagSensor'] else P['tagSensor']
+        ruleHeaderId = 20
+        maxViolated = 'NULL'
         if 'ruleHeaderId' in P.keys(): ruleHeaderId = P['ruleHeaderId']
-        else: ruleHeaderId = 20
+        if 'id' in P.keys(): ruleHeaderId = P['id']
+        if 'maxViolated' in P.keys(): maxViolated = P['maxViolated']
 
-        r = f"""( {ruleHeaderId} , NULL, '{tagSensor}', NULL, NULL, NULL, NULL, NULL, {sequence}, '{bracketOpen}', '{bracketClose}', {is_active}, NOW(), {preset_id} ),"""
+        r = f"""( {ruleHeaderId} , NULL, '{tagSensor}', NULL, NULL, NULL, NULL, NULL, {sequence}, '{bracketOpen}', '{bracketClose}', 0, {maxViolated}, {is_active}, NOW(), {preset_id} ),"""
         q += r
         evaluate += f"{bracketOpen}{tagSensor}{bracketClose} "
         tags_used.append(tagSensor)
-        
+
     q = q[:-1]
 
     # Value check
@@ -391,16 +400,16 @@ def post_rule(payload):
     try:
         Safeguard_status = eval(evaluate)
         qdel = f"""DELETE FROM {_DB_NAME_}.tb_combustion_rules_dtl
-                   WHERE f_rule_hdr_id={ruleHeaderId}  AND f_preset_id={preset_id} """
+                   WHERE f_rule_hdr_id={ruleHeaderId} AND f_preset_id={preset_id} """
         
         qup = f"""UPDATE {_DB_NAME_}.tb_combustion_rules_preset_hdr SET f_updated_at = NOW() 
                     WHERE f_rule_id={ruleHeaderId} AND f_preset_id={preset_id} """
-        
+
         with engine.connect() as conn:
             rup = conn.execute(qup)
             red = conn.execute(qdel)
             res = conn.execute(q)
-        
+
         return {'Status':'Success'}
 
     except Exception as E:
