@@ -1,22 +1,22 @@
 """
 Setting parameter untuk koneksi ke database.
 """
-__version__ = 'v1.5.6'
+__version__ = 'v1.7'
 
-_UNIT_CODE_ = "PCT2"
-_UNIT_NAME_ = "PLTU Pacitan 2"
+_UNIT_CODE_ = "PCT1"
+_UNIT_NAME_ = "PLTU Pacitan 1"
 _USER_ = "bat_copt"
 _PASS_ = "P@ssw0rd"
-_IP_ = "192.168.32.7:3306" # "10.7.1.116:33009" # 
-_LOCAL_IP_ = "192.168.31.97:5002" # "192.168.32.7:5002" # "0.0.0.0:5002"
-_DB_NAME_ = "db_bat_pct2"
+_IP_ = "192.168.32.6:3306" # "10.7.1.116:33009" # 
+_LOCAL_IP_ = "192.168.32.7:5002" # "0.0.0.0:5002"
+_DB_NAME_ = "db_bat_pct1"
 
 # "Setting parameter nama variabel"
 
-WATCHDOG_TAG = "OPC.AW2002.2LSB.WATCHDOG_STS.BO02"
+WATCHDOG_TAG = "OPC.AW1002.1LSB.WATCHDOG_STS.BO02"
 SAFEGUARD_TAG = "SAFEGUARD:COMBUSTION"
 SAFEGUARD_SOPT_TAG = "SAFEGUARD:SOOTBLOW"
-SAFEGUARD_USING_MAX_VIOLATED = False
+SAFEGUARD_USING_MAX_VIOLATED = True
 
 DESC_ENABLE_COPT = "COPT ENABLE STATUS"
 DESC_ENABLE_COPT_BT = "BURN TILT ENABLE"
