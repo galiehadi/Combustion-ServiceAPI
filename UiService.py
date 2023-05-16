@@ -220,7 +220,7 @@ def get_rules_detailed(rule_id):
 
     q = f"""SELECT f_rule_dtl_id AS ruleDetailId, f_rule_hdr_id AS ruleHeaderId, 
             f_sequence AS sequence, f_bracket_open AS bracketOpen, f_bracket_close AS bracketClose, 
-            f_tag_sensor AS tagSensor, f_max_violated AS maxViolated 
+            f_tag_sensor AS tagSensor, f_violated_count AS violatedCount, f_max_violated AS maxViolated 
             FROM {_DB_NAME_}.tb_combustion_rules_dtl
             WHERE /*f_rule_hdr_id = {rule_id} AND*/ f_preset_id = {presetId} """
     list = pd.read_sql(q, engine)

@@ -167,7 +167,7 @@ def bg_combustion_safeguard_check():
             Safeguard_status = pd.DataFrame(Individual_safeguard_values)['status'].min()
 
         ret = {
-            'Safeguard Status': Safeguard_status,
+            'Safeguard Status': bool(Safeguard_status),
             'Execution time': str(round(time.time() - t0,3)) + ' sec',
             'Individual Alarm': Alarms,
             'Individual Safeguard': Individual_safeguard_values,
