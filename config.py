@@ -8,7 +8,7 @@ _UNIT_NAME_ = "PLTU Pacitan 1"
 _USER_ = "bat_copt"
 _PASS_ = "P@ssw0rd"
 _IP_ = "192.168.32.6:3306" # "10.7.1.116:33008" # 
-_LOCAL_IP_ = "192.168.32.7:5002" # "0.0.0.0:5002"
+_LOCAL_IP_ = "192.168.32.6:5002" # "0.0.0.0:5002"
 _DB_NAME_ = "db_bat_pct1"
 
 # "Setting parameter nama variabel"

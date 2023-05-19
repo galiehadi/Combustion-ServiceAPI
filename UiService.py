@@ -31,7 +31,7 @@ def save_to_path(dataframe, filename="download"):
     #filename = f"COPT-{filename}-{time.strftime('%Y-%m-%d %H%M%S')}.csv" # CSV file
     filename = f"COPT-{filename}-{time.strftime('%Y-%m-%d %H%M%S')}.xlsx" # Excel file
     path = os.path.join(_TEMP_FOLDER_, filename)
-    dataframe.to_excel(path, index=False)
+    dataframe.to_excel(path, index=False, engine='xlsxwriter')
     return path
 
 def get_status():
