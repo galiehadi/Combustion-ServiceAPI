@@ -53,6 +53,15 @@ def bg_update_notification():
         if int(status_now):
             message = f'COPT Enabled on {timestamp_now}'
         else:
+            # create alarm copt disabled on alarm history
+            q = f"""INSERT INTO
+                {_DB_NAME_}.tb_combustion_alarm_history (f_timestamp,f_desc,f_set_value,f_actual_value,f_rule_header)
+                VALUES (NOW(),'COPT','COPT Disabled on {timestamp_now}',0, 0);"""
+            try:
+                with engine.connect() as conn: rin = conn.execute(q) 
+            except Exception as E: 
+                logging(f"Failed to execute INSERT on alarm history: {E}")            
+
             # Alarm messages
             q = f"""SELECT f_timestamp, f_desc, f_set_value, f_actual_value FROM tb_combustion_alarm_history
                 WHERE f_timestamp > NOW() - INTERVAL 2 MINUTE
@@ -68,6 +77,7 @@ def bg_update_notification():
                 alarm_message += alarm
 
             message = f'COPT Disabled on {timestamp_now}.'
+
             if len(alarm_message) > 25:
                 message += alarm_message
         q = f"""INSERT INTO tb_bat_notif (f_address_no,f_value,f_message,f_updated_at)
@@ -261,12 +271,12 @@ def bg_combustion_watchdog_check():
         except Exception as E:
             logging(f"Failed to turn off COPT: {E}")
 
-    if not Watchdog_safe and COPT_status == 0:
-        qin = f"""INSERT INTO
-                {_DB_NAME_}.tb_combustion_alarm_history (f_timestamp,f_desc,f_set_value,f_actual_value,f_rule_header)
-                VALUES (NOW(),'Watchdog','WatchdogStatus == 1',Watchdog_status, 0);"""
-        with engine.connect() as conn:
-            rin = conn.execute(qin)
+    # if not Watchdog_safe and COPT_status == 0:
+        # qin = f"""INSERT INTO
+        #         {_DB_NAME_}.tb_combustion_alarm_history (f_timestamp,f_desc,f_set_value,f_actual_value,f_rule_header)
+        #         VALUES (NOW(),'Watchdog','WatchdogStatus == 1',Watchdog_status, 0);"""
+        # with engine.connect() as conn:
+        #     rin = conn.execute(qin)
 
     ret = {
         'Watchdog Status': Watchdog_status,
