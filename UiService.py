@@ -88,6 +88,12 @@ def get_comb_tags():
 
     o2_intercept, o2_bias = get_o2_converter_parameters()
     df.loc['excess_o2','f_value']  = float(df.loc['excess_o2','f_value']) * o2_intercept + o2_bias
+    
+    for f in df.index:
+        if 'motor_current' in f:
+            df_ = pd.DataFrame([['Boolean', int(float(df.loc[f, 'f_value'])>1), '-']], 
+                               index = [f.replace('motor_current','enabled')], columns = df.columns)
+            df = df.append(df_)
 
     df['f_value'] = df['f_value'].astype(float).round(2).astype(str)
     text = []

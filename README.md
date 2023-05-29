@@ -17,3 +17,8 @@ Background services that manage the backend parts of Combustion Optimization out
 >
 > Removing limit on downloading Recommendation, adding editing description on alarm-history
 > Fixing bugs on alarm-history
+
+> **Update v1.8**
+>
+> Write to alarm history whenever COPT change to disabled
+> Adding Fan running and auto status
