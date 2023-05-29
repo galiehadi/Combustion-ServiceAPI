@@ -1,4 +1,4 @@
-$NV = "v1.8"
+NV="v1.8"
 
 docker stop services-combustion-pct1
 docker rm services-combustion-pct1

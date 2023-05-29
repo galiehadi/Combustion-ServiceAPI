@@ -1,5 +1,5 @@
-$NV = "v1.8"
-$OV = "v1.7"
+NV="v1.8"
+OV="v1.7"
 
 clear
 docker build -t services-combustion-pct1:$NV .
