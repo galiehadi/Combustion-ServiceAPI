@@ -3,17 +3,17 @@ Setting parameter untuk koneksi ke database.
 """
 __version__ = 'v1.8'
 
-_UNIT_CODE_ = "PCT1"
-_UNIT_NAME_ = "PLTU Pacitan 1"
+_UNIT_CODE_ = "PTN9"
+_UNIT_NAME_ = "PLTU Paiton 9"
 _USER_ = "bat_copt"
 _PASS_ = "P@ssw0rd"
-_IP_ = "192.168.32.6:3306" # "10.7.1.116:33008" # 
-_LOCAL_IP_ = "192.168.32.6:5002" # "0.0.0.0:5002"
-_DB_NAME_ = "db_bat_pct1"
+_IP_ = "192.168.1.16:3306" # "10.7.1.116:33032" # 
+_LOCAL_IP_ = "192.168.1.16:5002" # "0.0.0.0:5002"
+_DB_NAME_ = "db_bat_ptn9"
 
 # "Setting parameter nama variabel"
 
-WATCHDOG_TAG = "OPC.AW1002.1LSB.WATCHDOG_STS.BO02"
+WATCHDOG_TAG = "SOPT-WD-VALUE1.DROP180.UNIT1@NET0"
 SAFEGUARD_TAG = "SAFEGUARD:COMBUSTION"
 SAFEGUARD_SOPT_TAG = "SAFEGUARD:SOOTBLOW"
 SAFEGUARD_USING_MAX_VIOLATED = True
